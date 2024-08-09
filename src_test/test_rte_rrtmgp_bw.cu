@@ -277,7 +277,7 @@ void solve_radiation(int argc, char** argv)
         std::string error = "No longwave radiation implemented in the ray tracer";
         throw std::runtime_error(error);
     }
-    
+
     // Print the options to the screen.
     print_command_line_options(command_line_options);
 
@@ -388,7 +388,7 @@ void solve_radiation(int argc, char** argv)
 
         iwp.set_dims({n_col, n_lay});
         iwp = std::move(input_nc.get_variable<Float>("iwp", {n_lay, n_col_y, n_col_x}));
-        
+
         rel.set_dims({n_col, n_lay});
         rel = std::move(input_nc.get_variable<Float>("rel", {n_lay, n_col_y, n_col_x}));
 
@@ -640,6 +640,14 @@ void solve_radiation(int argc, char** argv)
     ////// RUN THE SHORTWAVE SOLVER //////
     if (switch_shortwave)
     {
+
+        cudaDeviceSynchronize();
+        cudaEvent_t start_full;
+        cudaEvent_t stop_full;
+        cudaEventCreate(&start_full);
+        cudaEventCreate(&stop_full);
+
+        cudaEventRecord(start_full, 0);
         // Initialize the solver.
         Status::print_message("Initializing the shortwave solver.");
 
@@ -693,7 +701,7 @@ void solve_radiation(int argc, char** argv)
             if (switch_cloud_mie)
                 rad_sw.load_mie_tables("mie_lut_visualisation.nc", switch_broadband);
         }
-        
+
         Array_gpu<Float,2> liwp_cam;
         Array_gpu<Float,2> tauc_cam;
         Array_gpu<Float,2> dist_cam;
@@ -706,7 +714,7 @@ void solve_radiation(int argc, char** argv)
             dist_cam.set_dims({camera.nx, camera.ny});
             zen_cam.set_dims({camera.nx, camera.ny});
         }
-        
+
         // Solve the radiation.
         Status::print_message("Solving the shortwave radiation.");
 
@@ -888,6 +896,16 @@ void solve_radiation(int argc, char** argv)
             }
         }
 
+        cudaEventRecord(stop_full, 0);
+        cudaEventSynchronize(stop_full);
+        float duration = 0.f;
+        cudaEventElapsedTime(&duration, start_full, stop_full);
+
+        cudaEventDestroy(start_full);
+        cudaEventDestroy(stop_full);
+
+        Status::print_message("Duration shortwave solver and some copies: " + std::to_string(duration) + " (ms)");
+
         // Store the output.
         Status::print_message("Storing the shortwave output.");
 
@@ -919,7 +937,7 @@ void solve_radiation(int argc, char** argv)
 
                 auto nc_xyz = output_nc.add_variable<Float>("XYZ", {"n","y","x"});
                 nc_xyz.insert(xyz_cpu.v(), {0, 0, 0});
-                
+
                 nc_xyz.add_attribute("long_name", "X Y Z tristimulus values");
             }
         }
@@ -930,19 +948,19 @@ void solve_radiation(int argc, char** argv)
             Array<Float,2> tauc_cam_cpu(tauc_cam);
             Array<Float,2> dist_cam_cpu(dist_cam);
             Array<Float,2> zen_cam_cpu(zen_cam);
-            
+
             auto nc_var_liwp = output_nc.add_variable<float>("liq_ice_wp_cam", {"y","x"});
             nc_var_liwp.insert(liwp_cam_cpu.v(), {0, 0});
             nc_var_liwp.add_attribute("long_name", "accumulated liquid+ice water path");
-            
+
             auto nc_var_tauc = output_nc.add_variable<float>("tau_cld_cam", {"y","x"});
             nc_var_tauc.insert(tauc_cam_cpu.v(), {0, 0});
             nc_var_tauc.add_attribute("long_name", "accumulated cloud optical depth (441-615nm band)");
-            
+
             auto nc_var_dist = output_nc.add_variable<float>("dist_cld_cam", {"y","x"});
             nc_var_dist.insert(dist_cam_cpu.v(), {0, 0});
             nc_var_dist.add_attribute("long_name", "distance to first cloudy cell");
-            
+
             auto nc_var_csza = output_nc.add_variable<float>("zen_cam", {"y","x"});
             nc_var_csza.insert(zen_cam_cpu.v(), {0, 0});
             nc_var_csza.add_attribute("long_name", "zenith angle of camera pixel");
