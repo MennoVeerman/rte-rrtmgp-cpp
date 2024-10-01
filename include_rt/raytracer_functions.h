@@ -214,7 +214,7 @@ namespace Raytracer_functions
     template<typename T>
     struct Random_number_generator
     {
-        __device__ Random_number_generator(unsigned int tid)
+        __device__ Random_number_generator(Int tid)
         {
             curand_init(tid, tid, 0, &state);
         }

@@ -19,7 +19,7 @@ class Optical_props_arry_rt;
 class Raytracer
 {
     public:
-        Raytracer();
+        Raytracer(int qrng_seed);
 
         void trace_rays(
                 const int qrng_gpt_offset,
@@ -55,6 +55,7 @@ class Raytracer
     private:
         curandDirectionVectors32_t* qrng_vectors_gpu;
         unsigned int* qrng_constants_gpu;
+        int qrng_seed;
 };
 #endif
 

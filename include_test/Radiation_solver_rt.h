@@ -91,7 +91,8 @@ class Radiation_solver_shortwave
                 const Gas_concs_gpu& gas_concs,
                 const std::string& file_name_gas,
                 const std::string& file_name_cloud,
-                const std::string& file_name_aerosol);
+                const std::string& file_name_aerosol,
+                const int qrng_seed);
 
         void load_mie_tables(
                 const std::string& file_name_mie);
@@ -155,7 +156,7 @@ class Radiation_solver_shortwave
         std::unique_ptr<Cloud_optics_rt> cloud_optics_gpu;
         std::unique_ptr<Aerosol_optics_rt> aerosol_optics_gpu;
         Rte_sw_rt rte_sw;
-        Raytracer raytracer;
+        std::unique_ptr<Raytracer> raytracer;
 
         std::unique_ptr<Optical_props_arry_rt> optical_props;
 

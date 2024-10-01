@@ -165,6 +165,7 @@ void ray_tracer_kernel(
 
     Photon photon;
     Random_number_generator<Float> rng(n+qrng_gpt_offset);
+    
     Quasi_random_number_generator_2d qrng(qrng_vectors, qrng_constants, n*photons_to_shoot + qrng_gpt_offset);
 
     const Float s_min = max(grid_size.z, max(grid_size.y, grid_size.x)) * Float_epsilon;

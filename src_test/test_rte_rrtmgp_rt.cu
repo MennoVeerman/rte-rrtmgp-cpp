@@ -388,606 +388,609 @@ void solve_radiation(int argc, char** argv)
 
     ////// CREATE THE OUTPUT FILE //////
     // Create the general dimensions and arrays.
-    Status::print_message("Preparing NetCDF output file.");
-
-    Netcdf_file output_nc("rte_rrtmgp_output.nc", Netcdf_mode::Create);
-    output_nc.add_dimension("col", n_col);
-    output_nc.add_dimension("x", n_col_x);
-    output_nc.add_dimension("y", n_col_y);
-    output_nc.add_dimension("lay", n_lay);
-    output_nc.add_dimension("lev", n_lev);
-    output_nc.add_dimension("pair", 2);
-
-    output_nc.add_dimension("z", n_z_in);
-    auto nc_x = output_nc.add_variable<Float>("x", {"x"});
-    auto nc_y = output_nc.add_variable<Float>("y", {"y"});
-    auto nc_z = output_nc.add_variable<Float>("z", {"z"});
-    nc_x.insert(grid_x.v(), {0});
-    nc_y.insert(grid_y.v(), {0});
-    nc_z.insert(grid_z.v(), {0});
-
-    auto nc_lay = output_nc.add_variable<Float>("p_lay", {"lay", "col"});
-    auto nc_lev = output_nc.add_variable<Float>("p_lev", {"lev", "col"});
-
-    nc_lay.insert(p_lay.v(), {0, 0});
-    nc_lev.insert(p_lev.v(), {0, 0});
-
-    int ngpts = 0;
-    int nbnds = 0;
-    if (switch_longwave)
+    
+    for (int iseed = 0; iseed<10; ++iseed)
     {
-        Netcdf_file coef_nc_lw("coefficients_lw.nc", Netcdf_mode::Read);
-        nbnds = std::max(coef_nc_lw.get_dimension_size("bnd"), nbnds);
-        ngpts = std::max(coef_nc_lw.get_dimension_size("gpt"), ngpts);
-    }
-    if (switch_shortwave)
-    {
-        Netcdf_file coef_nc_sw("coefficients_sw.nc", Netcdf_mode::Read);
-        nbnds = std::max(coef_nc_sw.get_dimension_size("bnd"), nbnds);
-        ngpts = std::max(coef_nc_sw.get_dimension_size("gpt"), ngpts);
-    }
-    configure_memory_pool(n_lay, n_col, 1024, ngpts, nbnds);
-
-
-    ////// RUN THE LONGWAVE SOLVER //////
-    if (switch_longwave)
-    {
-        // Initialize the solver.
-        Status::print_message("Initializing the longwave solver.");
-
-        Gas_concs_gpu gas_concs_gpu(gas_concs);
-
-        Radiation_solver_longwave rad_lw(gas_concs_gpu, "coefficients_lw.nc", "cloud_coefficients_lw.nc");
-
-        // Read the boundary conditions.
-        const int n_bnd_lw = rad_lw.get_n_bnd_gpu();
-        const int n_gpt_lw = rad_lw.get_n_gpt_gpu();
-
-        Array<Float,2> emis_sfc(input_nc.get_variable<Float>("emis_sfc", {n_col_y, n_col_x, n_bnd_lw}), {n_bnd_lw, n_col});
-        Array<Float,1> t_sfc(input_nc.get_variable<Float>("t_sfc", {n_col_y, n_col_x}), {n_col});
-
-        // Create output arrays.
-        Array_gpu<Float,2> lw_tau;
-        Array_gpu<Float,2> lay_source;
-        Array_gpu<Float,2> lev_source_inc;
-        Array_gpu<Float,2> lev_source_dec;
-        Array_gpu<Float,1> sfc_source;
-
-        if (switch_single_gpt)
+        Status::print_message("Preparing NetCDF output file.");
+    
+        Netcdf_file output_nc("rte_rrtmgp_output_"+std::to_string(iseed)+".nc", Netcdf_mode::Create);
+        output_nc.add_dimension("col", n_col);
+        output_nc.add_dimension("x", n_col_x);
+        output_nc.add_dimension("y", n_col_y);
+        output_nc.add_dimension("lay", n_lay);
+        output_nc.add_dimension("lev", n_lev);
+        output_nc.add_dimension("pair", 2);
+    
+        output_nc.add_dimension("z", n_z_in);
+        auto nc_x = output_nc.add_variable<Float>("x", {"x"});
+        auto nc_y = output_nc.add_variable<Float>("y", {"y"});
+        auto nc_z = output_nc.add_variable<Float>("z", {"z"});
+        nc_x.insert(grid_x.v(), {0});
+        nc_y.insert(grid_y.v(), {0});
+        nc_z.insert(grid_z.v(), {0});
+    
+        auto nc_lay = output_nc.add_variable<Float>("p_lay", {"lay", "col"});
+        auto nc_lev = output_nc.add_variable<Float>("p_lev", {"lev", "col"});
+    
+        nc_lay.insert(p_lay.v(), {0, 0});
+        nc_lev.insert(p_lev.v(), {0, 0});
+    
+        int ngpts = 0;
+        int nbnds = 0;
+        if (switch_longwave)
         {
-            lw_tau        .set_dims({n_col, n_lay});
-            lay_source    .set_dims({n_col, n_lay});
-            lev_source_inc.set_dims({n_col, n_lay});
-            lev_source_dec.set_dims({n_col, n_lay});
-            sfc_source    .set_dims({n_col});
+            Netcdf_file coef_nc_lw("coefficients_lw.nc", Netcdf_mode::Read);
+            nbnds = std::max(coef_nc_lw.get_dimension_size("bnd"), nbnds);
+            ngpts = std::max(coef_nc_lw.get_dimension_size("gpt"), ngpts);
         }
-
-        Array_gpu<Float,2> lw_flux_up;
-        Array_gpu<Float,2> lw_flux_dn;
-        Array_gpu<Float,2> lw_flux_net;
-
-        if (switch_fluxes)
+        if (switch_shortwave)
         {
-            lw_flux_up .set_dims({n_col, n_lev});
-            lw_flux_dn .set_dims({n_col, n_lev});
-            lw_flux_net.set_dims({n_col, n_lev});
+            Netcdf_file coef_nc_sw("coefficients_sw.nc", Netcdf_mode::Read);
+            nbnds = std::max(coef_nc_sw.get_dimension_size("bnd"), nbnds);
+            ngpts = std::max(coef_nc_sw.get_dimension_size("gpt"), ngpts);
         }
-
-        Array_gpu<Float,2> lw_gpt_flux_up;
-        Array_gpu<Float,2> lw_gpt_flux_dn;
-        Array_gpu<Float,2> lw_gpt_flux_net;
-
-        if (switch_single_gpt)
+        configure_memory_pool(n_lay, n_col, 1024, ngpts, nbnds);
+    
+    
+        ////// RUN THE LONGWAVE SOLVER //////
+        if (switch_longwave)
         {
-            lw_gpt_flux_up .set_dims({n_col, n_lev});
-            lw_gpt_flux_dn .set_dims({n_col, n_lev});
-            lw_gpt_flux_net.set_dims({n_col, n_lev});
-        }
-
-
-        // Solve the radiation.
-
-        Status::print_message("Solving the longwave radiation.");
-
-        auto run_solver = [&]()
-        {
-            Array_gpu<Float,2> p_lay_gpu(p_lay);
-            Array_gpu<Float,2> p_lev_gpu(p_lev);
-            Array_gpu<Float,2> t_lay_gpu(t_lay);
-            Array_gpu<Float,2> t_lev_gpu(t_lev);
-            Array_gpu<Float,2> col_dry_gpu(col_dry);
-            Array_gpu<Float,1> t_sfc_gpu(t_sfc);
-            Array_gpu<Float,2> emis_sfc_gpu(emis_sfc);
-            Array_gpu<Float,2> lwp_gpu(lwp);
-            Array_gpu<Float,2> iwp_gpu(iwp);
-            Array_gpu<Float,2> rel_gpu(rel);
-            Array_gpu<Float,2> rei_gpu(rei);
-
-
-            cudaDeviceSynchronize();
-            cudaEvent_t start;
-            cudaEvent_t stop;
-            cudaEventCreate(&start);
-            cudaEventCreate(&stop);
-
-            cudaEventRecord(start, 0);
-
-            rad_lw.solve_gpu(
-                    switch_fluxes,
-                    switch_cloud_optics,
-                    switch_single_gpt,
-                    single_gpt,
-                    gas_concs_gpu,
-                    p_lay_gpu, p_lev_gpu,
-                    t_lay_gpu, t_lev_gpu,
-                    col_dry_gpu,
-                    t_sfc_gpu, emis_sfc_gpu,
-                    lwp_gpu, iwp_gpu,
-                    rel_gpu, rei_gpu,
-                    lw_tau, lay_source, lev_source_inc, lev_source_dec, sfc_source,
-                    lw_flux_up, lw_flux_dn, lw_flux_net,
-                    lw_gpt_flux_up, lw_gpt_flux_dn, lw_gpt_flux_net);
-
-            cudaEventRecord(stop, 0);
-            cudaEventSynchronize(stop);
-            float duration = 0.f;
-            cudaEventElapsedTime(&duration, start, stop);
-
-            cudaEventDestroy(start);
-            cudaEventDestroy(stop);
-
-            Status::print_message("Duration longwave solver: " + std::to_string(duration) + " (ms)");
-        };
-
-        // Tuning step;
-        run_solver();
-
-        // Profiling step;
-        cudaProfilerStart();
-        run_solver();
-        cudaProfilerStop();
-
-        constexpr int n_measures=10;
-        for (int n=0; n<n_measures; ++n)
-            run_solver();
-
-
-        //// Store the output.
-        Status::print_message("Storing the longwave output.");
-        Array<Float,2> lw_tau_cpu(lw_tau);
-        Array<Float,2> lay_source_cpu(lay_source);
-        Array<Float,1> sfc_source_cpu(sfc_source);
-        Array<Float,2> lev_source_inc_cpu(lev_source_inc);
-        Array<Float,2> lev_source_dec_cpu(lev_source_dec);
-        Array<Float,2> lw_flux_up_cpu(lw_flux_up);
-        Array<Float,2> lw_flux_dn_cpu(lw_flux_dn);
-        Array<Float,2> lw_flux_net_cpu(lw_flux_net);
-        Array<Float,2> lw_gpt_flux_up_cpu(lw_gpt_flux_up);
-        Array<Float,2> lw_gpt_flux_dn_cpu(lw_gpt_flux_dn);
-        Array<Float,2> lw_gpt_flux_net_cpu(lw_gpt_flux_net);
-
-        output_nc.add_dimension("gpt_lw", n_gpt_lw);
-        output_nc.add_dimension("band_lw", n_bnd_lw);
-
-        auto nc_lw_band_lims_wvn = output_nc.add_variable<Float>("lw_band_lims_wvn", {"band_lw", "pair"});
-        nc_lw_band_lims_wvn.insert(rad_lw.get_band_lims_wavenumber_gpu().v(), {0, 0});
-
-        if (switch_single_gpt)
-        {
-            auto nc_lw_band_lims_gpt = output_nc.add_variable<int>("lw_band_lims_gpt", {"band_lw", "pair"});
-            nc_lw_band_lims_gpt.insert(rad_lw.get_band_lims_gpoint_gpu().v(), {0, 0});
-
-            auto nc_lw_tau = output_nc.add_variable<Float>("lw_tau", {"lay", "y", "x"});
-            nc_lw_tau.insert(lw_tau_cpu.v(), {0, 0, 0});
-
-            auto nc_lay_source     = output_nc.add_variable<Float>("lay_source"    , {"lay", "y", "x"});
-            auto nc_lev_source_inc = output_nc.add_variable<Float>("lev_source_inc", {"lay", "y", "x"});
-            auto nc_lev_source_dec = output_nc.add_variable<Float>("lev_source_dec", {"lay", "y", "x"});
-
-            auto nc_sfc_source = output_nc.add_variable<Float>("sfc_source", {"y", "x"});
-
-            nc_lay_source.insert    (lay_source_cpu.v()    , {0, 0, 0});
-            nc_lev_source_inc.insert(lev_source_inc_cpu.v(), {0, 0, 0});
-            nc_lev_source_dec.insert(lev_source_dec_cpu.v(), {0, 0, 0});
-
-            nc_sfc_source.insert(sfc_source_cpu.v(), {0, 0});
-        }
-
-        if (switch_fluxes)
-        {
-            auto nc_lw_flux_up  = output_nc.add_variable<Float>("lw_flux_up" , {"lev", "y", "x"});
-            auto nc_lw_flux_dn  = output_nc.add_variable<Float>("lw_flux_dn" , {"lev", "y", "x"});
-            auto nc_lw_flux_net = output_nc.add_variable<Float>("lw_flux_net", {"lev", "y", "x"});
-
-            nc_lw_flux_up .insert(lw_flux_up_cpu .v(), {0, 0, 0});
-            nc_lw_flux_dn .insert(lw_flux_dn_cpu .v(), {0, 0, 0});
-            nc_lw_flux_net.insert(lw_flux_net_cpu.v(), {0, 0, 0});
-
+            // Initialize the solver.
+            Status::print_message("Initializing the longwave solver.");
+    
+            Gas_concs_gpu gas_concs_gpu(gas_concs);
+    
+            Radiation_solver_longwave rad_lw(gas_concs_gpu, "coefficients_lw.nc", "cloud_coefficients_lw.nc");
+    
+            // Read the boundary conditions.
+            const int n_bnd_lw = rad_lw.get_n_bnd_gpu();
+            const int n_gpt_lw = rad_lw.get_n_gpt_gpu();
+    
+            Array<Float,2> emis_sfc(input_nc.get_variable<Float>("emis_sfc", {n_col_y, n_col_x, n_bnd_lw}), {n_bnd_lw, n_col});
+            Array<Float,1> t_sfc(input_nc.get_variable<Float>("t_sfc", {n_col_y, n_col_x}), {n_col});
+    
+            // Create output arrays.
+            Array_gpu<Float,2> lw_tau;
+            Array_gpu<Float,2> lay_source;
+            Array_gpu<Float,2> lev_source_inc;
+            Array_gpu<Float,2> lev_source_dec;
+            Array_gpu<Float,1> sfc_source;
+    
             if (switch_single_gpt)
             {
-                auto nc_lw_gpt_flux_up  = output_nc.add_variable<Float>("lw_gpt_flux_up" , {"lev", "y", "x"});
-                auto nc_lw_gpt_flux_dn  = output_nc.add_variable<Float>("lw_gpt_flux_dn" , {"lev", "y", "x"});
-                auto nc_lw_gpt_flux_net = output_nc.add_variable<Float>("lw_gpt_flux_net", {"lev", "y", "x"});
-
-                nc_lw_gpt_flux_up .insert(lw_gpt_flux_up_cpu.v(), {0, 0, 0});
-                nc_lw_gpt_flux_dn .insert(lw_gpt_flux_dn_cpu.v(), {0, 0, 0});
-                nc_lw_gpt_flux_net.insert(lw_gpt_flux_net_cpu.v(), {0, 0, 0});
+                lw_tau        .set_dims({n_col, n_lay});
+                lay_source    .set_dims({n_col, n_lay});
+                lev_source_inc.set_dims({n_col, n_lay});
+                lev_source_dec.set_dims({n_col, n_lay});
+                sfc_source    .set_dims({n_col});
             }
-        }
-    }
-
-
-    ////// RUN THE SHORTWAVE SOLVER //////
-    if (switch_shortwave)
-    {
-        // Initialize the solver.
-        Status::print_message("Initializing the shortwave solver.");
-
-
-        Gas_concs_gpu gas_concs_gpu(gas_concs);
-        Radiation_solver_shortwave rad_sw(gas_concs_gpu, "coefficients_sw.nc", "cloud_coefficients_sw.nc", "aerosol_optics.nc");
-
-        // Read the boundary conditions.
-        const int n_bnd_sw = rad_sw.get_n_bnd_gpu();
-        const int n_gpt_sw = rad_sw.get_n_gpt_gpu();
-
-        //load Mie LUT first
-        if (switch_cloud_mie)
-        {
-            rad_sw.load_mie_tables("mie_lut_broadband.nc");
-        }
-
-
-        Array<Float,1> mu0(input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x}), {n_col});
-        Array<Float,1> azi(input_nc.get_variable<Float>("azi", {n_col_y, n_col_x}), {n_col});
-        Array<Float,2> sfc_alb_dir(input_nc.get_variable<Float>("sfc_alb_dir", {n_col_y, n_col_x, n_bnd_sw}), {n_bnd_sw, n_col});
-        Array<Float,2> sfc_alb_dif(input_nc.get_variable<Float>("sfc_alb_dif", {n_col_y, n_col_x, n_bnd_sw}), {n_bnd_sw, n_col});
-
-        Array<Float,1> tsi_scaling({n_col});
-        if (input_nc.variable_exists("tsi"))
-        {
-            Array<Float,1> tsi(input_nc.get_variable<Float>("tsi", {n_col_y, n_col_x}), {n_col});
-            const Float tsi_ref = rad_sw.get_tsi_gpu();
-            for (int icol=1; icol<=n_col; ++icol)
-                tsi_scaling({icol}) = tsi({icol}) / tsi_ref;
-        }
-        else if (input_nc.variable_exists("tsi_scaling"))
-        {
-            Float tsi_scaling_in = input_nc.get_variable<Float>("tsi_scaling");
-            for (int icol=1; icol<=n_col; ++icol)
-                tsi_scaling({icol}) = tsi_scaling_in;
-        }
-        else
-        {
-            for (int icol=1; icol<=n_col; ++icol)
-                tsi_scaling({icol}) = Float(1.);
-        }
-
-        // Create output arrays.
-        Array_gpu<Float,2> sw_tot_tau;
-        Array_gpu<Float,2> sw_tot_ssa;
-        Array_gpu<Float,2> sw_cld_tau;
-        Array_gpu<Float,2> sw_cld_ssa;
-        Array_gpu<Float,2> sw_cld_asy;
-        Array_gpu<Float,2> sw_aer_tau;
-        Array_gpu<Float,2> sw_aer_ssa;
-        Array_gpu<Float,2> sw_aer_asy;
-
-        if (switch_single_gpt)
-        {
-            sw_tot_tau    .set_dims({n_col, n_lay});
-            sw_tot_ssa    .set_dims({n_col, n_lay});
-            sw_cld_tau    .set_dims({n_col, n_lay});
-            sw_cld_ssa    .set_dims({n_col, n_lay});
-            sw_cld_asy    .set_dims({n_col, n_lay});
-            sw_aer_tau    .set_dims({n_col, n_lay});
-            sw_aer_ssa    .set_dims({n_col, n_lay});
-            sw_aer_asy    .set_dims({n_col, n_lay});
-        }
-
-        Array_gpu<Float,2> sw_flux_up;
-        Array_gpu<Float,2> sw_flux_dn;
-        Array_gpu<Float,2> sw_flux_dn_dir;
-        Array_gpu<Float,2> sw_flux_net;
-
-        Array_gpu<Float,2> rt_flux_tod_up;
-        Array_gpu<Float,2> rt_flux_sfc_dir;
-        Array_gpu<Float,2> rt_flux_sfc_dif;
-        Array_gpu<Float,2> rt_flux_sfc_up;
-        Array_gpu<Float,3> rt_flux_abs_dir;
-        Array_gpu<Float,3> rt_flux_abs_dif;
-
-
-        if (switch_fluxes)
-        {
-            sw_flux_up    .set_dims({n_col, n_lev});
-            sw_flux_dn    .set_dims({n_col, n_lev});
-            sw_flux_dn_dir.set_dims({n_col, n_lev});
-            sw_flux_net   .set_dims({n_col, n_lev});
-            if (switch_raytracing)
+    
+            Array_gpu<Float,2> lw_flux_up;
+            Array_gpu<Float,2> lw_flux_dn;
+            Array_gpu<Float,2> lw_flux_net;
+    
+            if (switch_fluxes)
             {
-                rt_flux_tod_up .set_dims({n_col_x, n_col_y});
-                rt_flux_sfc_dir.set_dims({n_col_x, n_col_y});
-                rt_flux_sfc_dif.set_dims({n_col_x, n_col_y});
-                rt_flux_sfc_up .set_dims({n_col_x, n_col_y});
-                rt_flux_abs_dir.set_dims({n_col_x, n_col_y, n_z});
-                rt_flux_abs_dif.set_dims({n_col_x, n_col_y, n_z});
+                lw_flux_up .set_dims({n_col, n_lev});
+                lw_flux_dn .set_dims({n_col, n_lev});
+                lw_flux_net.set_dims({n_col, n_lev});
             }
-
-        }
-
-        Array_gpu<Float,2> sw_gpt_flux_up;
-        Array_gpu<Float,2> sw_gpt_flux_dn;
-        Array_gpu<Float,2> sw_gpt_flux_dn_dir;
-        Array_gpu<Float,2> sw_gpt_flux_net;
-
-        if (switch_single_gpt)
-        {
-            sw_gpt_flux_up    .set_dims({n_col, n_lev});
-            sw_gpt_flux_dn    .set_dims({n_col, n_lev});
-            sw_gpt_flux_dn_dir.set_dims({n_col, n_lev});
-            sw_gpt_flux_net   .set_dims({n_col, n_lev});
-        }
-
-
-        // Solve the radiation.
-        Status::print_message("Solving the shortwave radiation.");
-
-        auto run_solver = [&]()
-        {
-            Array_gpu<Float,2> p_lay_gpu(p_lay);
-            Array_gpu<Float,2> p_lev_gpu(p_lev);
-            Array_gpu<Float,2> t_lay_gpu(t_lay);
-            Array_gpu<Float,2> t_lev_gpu(t_lev);
-            Array_gpu<Float,2> col_dry_gpu(col_dry);
-            Array_gpu<Float,2> sfc_alb_dir_gpu(sfc_alb_dir);
-            Array_gpu<Float,2> sfc_alb_dif_gpu(sfc_alb_dif);
-            Array_gpu<Float,1> tsi_scaling_gpu(tsi_scaling);
-            Array_gpu<Float,1> mu0_gpu(mu0);
-            Array_gpu<Float,1> azi_gpu(azi);
-            Array_gpu<Float,2> lwp_gpu(lwp);
-            Array_gpu<Float,2> iwp_gpu(iwp);
-            Array_gpu<Float,2> rel_gpu(rel);
-            Array_gpu<Float,2> rei_gpu(rei);
-
-            Array_gpu<Float,2> rh_gpu(rh);
-            Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
-
-            cudaDeviceSynchronize();
-            cudaEvent_t start;
-            cudaEvent_t stop;
-            cudaEventCreate(&start);
-            cudaEventCreate(&stop);
-
-            cudaEventRecord(start, 0);
-
-            rad_sw.solve_gpu(
-                    switch_fluxes,
-                    switch_raytracing,
-                    switch_independent_column,
-                    switch_cloud_optics,
-                    switch_cloud_mie,
-                    switch_aerosol_optics,
-                    switch_single_gpt,
-                    switch_delta_cloud,
-                    switch_delta_aerosol,
-                    single_gpt,
-                    photons_per_pixel,
-                    grid_cells,
-                    grid_d,
-                    kn_grid,
-                    gas_concs_gpu,
-                    p_lay_gpu, p_lev_gpu,
-                    t_lay_gpu, t_lev_gpu,
-                    col_dry_gpu,
-                    sfc_alb_dir_gpu, sfc_alb_dif_gpu,
-                    tsi_scaling_gpu, mu0_gpu, azi_gpu,
-                    lwp_gpu, iwp_gpu,
-                    rel_gpu, rei_gpu,
-                    rh,
-                    aerosol_concs,
-                    sw_tot_tau, sw_tot_ssa,
-                    sw_cld_tau, sw_cld_ssa, sw_cld_asy,
-                    sw_aer_tau, sw_aer_ssa, sw_aer_asy,
-                    sw_flux_up, sw_flux_dn,
-                    sw_flux_dn_dir, sw_flux_net,
-                    sw_gpt_flux_up, sw_gpt_flux_dn,
-                    sw_gpt_flux_dn_dir, sw_gpt_flux_net,
-                    rt_flux_tod_up,
-                    rt_flux_sfc_dir,
-                    rt_flux_sfc_dif,
-                    rt_flux_sfc_up,
-                    rt_flux_abs_dir,
-                    rt_flux_abs_dif);
-
-            cudaEventRecord(stop, 0);
-            cudaEventSynchronize(stop);
-            float duration = 0.f;
-            cudaEventElapsedTime(&duration, start, stop);
-
-            cudaEventDestroy(start);
-            cudaEventDestroy(stop);
-
-            Status::print_message("Duration shortwave solver: " + std::to_string(duration) + " (ms)");
-        };
-
-        // Tuning step;
-        run_solver();
-
-        // Profiling step;
-        if (switch_profiling)
-        {
+    
+            Array_gpu<Float,2> lw_gpt_flux_up;
+            Array_gpu<Float,2> lw_gpt_flux_dn;
+            Array_gpu<Float,2> lw_gpt_flux_net;
+    
+            if (switch_single_gpt)
+            {
+                lw_gpt_flux_up .set_dims({n_col, n_lev});
+                lw_gpt_flux_dn .set_dims({n_col, n_lev});
+                lw_gpt_flux_net.set_dims({n_col, n_lev});
+            }
+    
+    
+            // Solve the radiation.
+    
+            Status::print_message("Solving the longwave radiation.");
+    
+            auto run_solver = [&]()
+            {
+                Array_gpu<Float,2> p_lay_gpu(p_lay);
+                Array_gpu<Float,2> p_lev_gpu(p_lev);
+                Array_gpu<Float,2> t_lay_gpu(t_lay);
+                Array_gpu<Float,2> t_lev_gpu(t_lev);
+                Array_gpu<Float,2> col_dry_gpu(col_dry);
+                Array_gpu<Float,1> t_sfc_gpu(t_sfc);
+                Array_gpu<Float,2> emis_sfc_gpu(emis_sfc);
+                Array_gpu<Float,2> lwp_gpu(lwp);
+                Array_gpu<Float,2> iwp_gpu(iwp);
+                Array_gpu<Float,2> rel_gpu(rel);
+                Array_gpu<Float,2> rei_gpu(rei);
+    
+    
+                cudaDeviceSynchronize();
+                cudaEvent_t start;
+                cudaEvent_t stop;
+                cudaEventCreate(&start);
+                cudaEventCreate(&stop);
+    
+                cudaEventRecord(start, 0);
+    
+                rad_lw.solve_gpu(
+                        switch_fluxes,
+                        switch_cloud_optics,
+                        switch_single_gpt,
+                        single_gpt,
+                        gas_concs_gpu,
+                        p_lay_gpu, p_lev_gpu,
+                        t_lay_gpu, t_lev_gpu,
+                        col_dry_gpu,
+                        t_sfc_gpu, emis_sfc_gpu,
+                        lwp_gpu, iwp_gpu,
+                        rel_gpu, rei_gpu,
+                        lw_tau, lay_source, lev_source_inc, lev_source_dec, sfc_source,
+                        lw_flux_up, lw_flux_dn, lw_flux_net,
+                        lw_gpt_flux_up, lw_gpt_flux_dn, lw_gpt_flux_net);
+    
+                cudaEventRecord(stop, 0);
+                cudaEventSynchronize(stop);
+                float duration = 0.f;
+                cudaEventElapsedTime(&duration, start, stop);
+    
+                cudaEventDestroy(start);
+                cudaEventDestroy(stop);
+    
+                Status::print_message("Duration longwave solver: " + std::to_string(duration) + " (ms)");
+            };
+    
+            // Tuning step;
+            run_solver();
+    
+            // Profiling step;
             cudaProfilerStart();
             run_solver();
             cudaProfilerStop();
-        }
-
-        // Store the output.
-        Status::print_message("Storing the shortwave output.");
-        Array<Float,2> sw_tot_tau_cpu(sw_tot_tau);
-        Array<Float,2> sw_tot_ssa_cpu(sw_tot_ssa);
-        Array<Float,2> sw_cld_tau_cpu(sw_cld_tau);
-        Array<Float,2> sw_cld_ssa_cpu(sw_cld_ssa);
-        Array<Float,2> sw_cld_asy_cpu(sw_cld_asy);
-        Array<Float,2> sw_aer_tau_cpu(sw_aer_tau);
-        Array<Float,2> sw_aer_ssa_cpu(sw_aer_ssa);
-        Array<Float,2> sw_aer_asy_cpu(sw_aer_asy);
-
-        Array<Float,2> sw_flux_up_cpu(sw_flux_up);
-        Array<Float,2> sw_flux_dn_cpu(sw_flux_dn);
-        Array<Float,2> sw_flux_dn_dir_cpu(sw_flux_dn_dir);
-        Array<Float,2> sw_flux_net_cpu(sw_flux_net);
-        Array<Float,2> sw_gpt_flux_up_cpu(sw_gpt_flux_up);
-        Array<Float,2> sw_gpt_flux_dn_cpu(sw_gpt_flux_dn);
-        Array<Float,2> sw_gpt_flux_dn_dir_cpu(sw_gpt_flux_dn_dir);
-        Array<Float,2> sw_gpt_flux_net_cpu(sw_gpt_flux_net);
-
-        Array<Float,2> rt_flux_tod_up_cpu(rt_flux_tod_up);
-        Array<Float,2> rt_flux_sfc_dir_cpu(rt_flux_sfc_dir);
-        Array<Float,2> rt_flux_sfc_dif_cpu(rt_flux_sfc_dif);
-        Array<Float,2> rt_flux_sfc_up_cpu(rt_flux_sfc_up);
-        Array<Float,3> rt_flux_abs_dir_cpu(rt_flux_abs_dir);
-        Array<Float,3> rt_flux_abs_dif_cpu(rt_flux_abs_dif);
-
-        output_nc.add_dimension("gpt_sw", n_gpt_sw);
-        output_nc.add_dimension("band_sw", n_bnd_sw);
-
-        auto nc_sw_band_lims_wvn = output_nc.add_variable<Float>("sw_band_lims_wvn", {"band_sw", "pair"});
-        nc_sw_band_lims_wvn.insert(rad_sw.get_band_lims_wavenumber_gpu().v(), {0, 0});
-
-        if (switch_single_gpt)
-        {
-            auto nc_sw_band_lims_gpt = output_nc.add_variable<int>("sw_band_lims_gpt", {"band_sw", "pair"});
-            nc_sw_band_lims_gpt.insert(rad_sw.get_band_lims_gpoint_gpu().v(), {0, 0});
-
-            auto nc_tot_tau = output_nc.add_variable<Float>("tot_tau"  , {"lay", "y", "x"});
-            auto nc_tot_ssa = output_nc.add_variable<Float>("tot_ssa"  , {"lay", "y", "x"});
-            auto nc_cld_tau = output_nc.add_variable<Float>("cld_tau"  , {"lay", "y", "x"});
-            auto nc_cld_ssa = output_nc.add_variable<Float>("cld_ssa"  , {"lay", "y", "x"});
-            auto nc_cld_asy = output_nc.add_variable<Float>("cld_asy"  , {"lay", "y", "x"});
-            auto nc_aer_tau = output_nc.add_variable<Float>("aer_tau"  , {"lay", "y", "x"});
-            auto nc_aer_ssa = output_nc.add_variable<Float>("aer_ssa"  , {"lay", "y", "x"});
-            auto nc_aer_asy = output_nc.add_variable<Float>("aer_asy"  , {"lay", "y", "x"});
-
-            nc_tot_tau.insert(sw_tot_tau_cpu.v(), {0, 0, 0});
-            nc_tot_ssa.insert(sw_tot_ssa_cpu.v(), {0, 0, 0});
-            nc_cld_tau.insert(sw_cld_tau_cpu.v(), {0, 0, 0});
-            nc_cld_ssa.insert(sw_cld_ssa_cpu.v(), {0, 0, 0});
-            nc_cld_asy.insert(sw_cld_asy_cpu.v(), {0, 0, 0});
-            nc_aer_tau.insert(sw_aer_tau_cpu.v(), {0, 0, 0});
-            nc_aer_ssa.insert(sw_aer_ssa_cpu.v(), {0, 0, 0});
-            nc_aer_asy.insert(sw_aer_asy_cpu.v(), {0, 0, 0});
-        
-            nc_tot_tau.add_attribute("long_name","Total optical depth at g-point "+std::to_string(single_gpt));
-            nc_tot_ssa.add_attribute("long_name","Total single scattering albedo at g-point "+std::to_string(single_gpt));
-            nc_cld_tau.add_attribute("long_name","Cloud optical depth at g-point "+std::to_string(single_gpt));
-            nc_cld_ssa.add_attribute("long_name","Cloud single scattering albedo at g-point "+std::to_string(single_gpt));
-            nc_cld_asy.add_attribute("long_name","Cloud asymmetry parameter at g-point "+std::to_string(single_gpt));
-            nc_aer_tau.add_attribute("long_name","Aerosol optical depth at g-point "+std::to_string(single_gpt));
-            nc_aer_ssa.add_attribute("long_name","Aerosol single scattering albedo at g-point "+std::to_string(single_gpt));
-            nc_aer_asy.add_attribute("long_name","Aerosol asymmetry parameter at g-point "+std::to_string(single_gpt));
-            
-            nc_tot_tau.add_attribute("units", "-");
-            nc_tot_ssa.add_attribute("units", "-");
-            nc_cld_tau.add_attribute("units", "-");
-            nc_cld_ssa.add_attribute("units", "-");
-            nc_cld_asy.add_attribute("units", "-");
-            nc_aer_tau.add_attribute("units", "-");
-            nc_aer_ssa.add_attribute("units", "-");
-            nc_aer_asy.add_attribute("units", "-");
-            
-        }
-
-        if (switch_fluxes)
-        {
-            auto nc_sw_flux_up     = output_nc.add_variable<Float>("sw_flux_up"    , {"lev", "y", "x"});
-            auto nc_sw_flux_dn     = output_nc.add_variable<Float>("sw_flux_dn"    , {"lev", "y", "x"});
-            auto nc_sw_flux_dn_dir = output_nc.add_variable<Float>("sw_flux_dn_dir", {"lev", "y", "x"});
-            auto nc_sw_flux_net    = output_nc.add_variable<Float>("sw_flux_net"   , {"lev", "y", "x"});
-
-            nc_sw_flux_up    .insert(sw_flux_up_cpu    .v(), {0, 0, 0});
-            nc_sw_flux_dn    .insert(sw_flux_dn_cpu    .v(), {0, 0, 0});
-            nc_sw_flux_dn_dir.insert(sw_flux_dn_dir_cpu.v(), {0, 0, 0});
-            nc_sw_flux_net   .insert(sw_flux_net_cpu   .v(), {0, 0, 0});
-
-            nc_sw_flux_up.add_attribute("long_name","Upwelling shortwave fluxes (TwoStream solver)");
-            nc_sw_flux_up.add_attribute("units","W m-2");
-            
-            nc_sw_flux_dn.add_attribute("long_name","Downwelling shortwave fluxes (TwoStream solver)");
-            nc_sw_flux_dn.add_attribute("units","W m-2");
-            
-            nc_sw_flux_dn_dir.add_attribute("long_name","Downwelling direct shortwave fluxes (TwoStream solver)");
-            nc_sw_flux_dn_dir.add_attribute("units","W m-2");
-            
-            nc_sw_flux_net.add_attribute("long_name","Net shortwave fluxes (TwoStream solver)");
-            nc_sw_flux_net.add_attribute("units","W m-2");
-            
-            if (switch_raytracing)
-            {
-                auto nc_rt_flux_tod_up  = output_nc.add_variable<Float>("rt_flux_tod_up",  {"y","x"});
-                auto nc_rt_flux_sfc_dir = output_nc.add_variable<Float>("rt_flux_sfc_dir", {"y","x"});
-                auto nc_rt_flux_sfc_dif = output_nc.add_variable<Float>("rt_flux_sfc_dif", {"y","x"});
-                auto nc_rt_flux_sfc_up  = output_nc.add_variable<Float>("rt_flux_sfc_up",  {"y","x"});
-                auto nc_rt_flux_abs_dir = output_nc.add_variable<Float>("rt_flux_abs_dir", {"z","y","x"});
-                auto nc_rt_flux_abs_dif = output_nc.add_variable<Float>("rt_flux_abs_dif", {"z","y","x"});
-
-                nc_rt_flux_tod_up .insert(rt_flux_tod_up_cpu .v(), {0,0});
-                nc_rt_flux_sfc_dir.insert(rt_flux_sfc_dir_cpu.v(), {0,0});
-                nc_rt_flux_sfc_dif.insert(rt_flux_sfc_dif_cpu.v(), {0,0});
-                nc_rt_flux_sfc_up .insert(rt_flux_sfc_up_cpu .v(), {0,0});
-
-                nc_rt_flux_abs_dir.insert(rt_flux_abs_dir_cpu.v(), {0,0,0});
-                nc_rt_flux_abs_dif.insert(rt_flux_abs_dif_cpu.v(), {0,0,0});
- 
-                nc_rt_flux_tod_up.add_attribute("long_name","Upwelling shortwave top-of-domain fluxes (Monte Carlo ray tracer)");
-                nc_rt_flux_tod_up.add_attribute("units","W m-2");
-                
-                nc_rt_flux_sfc_dir.add_attribute("long_name","Downwelling direct shortwave surface fluxes (Monte Carlo ray tracer)");
-                nc_rt_flux_sfc_dir.add_attribute("units","W m-2");
-                
-                nc_rt_flux_sfc_dif.add_attribute("long_name","Downwelling diffuse shortwave surface fluxes (Monte Carlo ray tracer)");
-                nc_rt_flux_sfc_dif.add_attribute("units","W m-2");
-                
-                nc_rt_flux_sfc_up.add_attribute("long_name","Upwelling shortwave surface fluxes (Monte Carlo ray tracer)");
-                nc_rt_flux_sfc_up.add_attribute("units","W m-2");
-                
-                nc_rt_flux_abs_dir.add_attribute("long_name","Absorbed direct shortwave fluxes (Monte Carlo ray tracer)");
-                nc_rt_flux_abs_dir.add_attribute("units","W m-3");
-            
-                nc_rt_flux_abs_dif.add_attribute("long_name","Absorbed diffuse shortwave fluxes (Monte Carlo ray tracer)");
-                nc_rt_flux_abs_dif.add_attribute("units","W m-3");
-
-            }
-
-
+    
+            constexpr int n_measures=10;
+            for (int n=0; n<n_measures; ++n)
+                run_solver();
+    
+    
+            //// Store the output.
+            Status::print_message("Storing the longwave output.");
+            Array<Float,2> lw_tau_cpu(lw_tau);
+            Array<Float,2> lay_source_cpu(lay_source);
+            Array<Float,1> sfc_source_cpu(sfc_source);
+            Array<Float,2> lev_source_inc_cpu(lev_source_inc);
+            Array<Float,2> lev_source_dec_cpu(lev_source_dec);
+            Array<Float,2> lw_flux_up_cpu(lw_flux_up);
+            Array<Float,2> lw_flux_dn_cpu(lw_flux_dn);
+            Array<Float,2> lw_flux_net_cpu(lw_flux_net);
+            Array<Float,2> lw_gpt_flux_up_cpu(lw_gpt_flux_up);
+            Array<Float,2> lw_gpt_flux_dn_cpu(lw_gpt_flux_dn);
+            Array<Float,2> lw_gpt_flux_net_cpu(lw_gpt_flux_net);
+    
+            output_nc.add_dimension("gpt_lw", n_gpt_lw);
+            output_nc.add_dimension("band_lw", n_bnd_lw);
+    
+            auto nc_lw_band_lims_wvn = output_nc.add_variable<Float>("lw_band_lims_wvn", {"band_lw", "pair"});
+            nc_lw_band_lims_wvn.insert(rad_lw.get_band_lims_wavenumber_gpu().v(), {0, 0});
+    
             if (switch_single_gpt)
             {
-                auto nc_sw_gpt_flux_up     = output_nc.add_variable<Float>("sw_gpt_flux_up"    , {"lev", "y", "x"});
-                auto nc_sw_gpt_flux_dn     = output_nc.add_variable<Float>("sw_gpt_flux_dn"    , {"lev", "y", "x"});
-                auto nc_sw_gpt_flux_dn_dir = output_nc.add_variable<Float>("sw_gpt_flux_dn_dir", {"lev", "y", "x"});
-                auto nc_sw_gpt_flux_net    = output_nc.add_variable<Float>("sw_gpt_flux_net"   , {"lev", "y", "x"});
-
-                nc_sw_gpt_flux_up    .insert(sw_gpt_flux_up_cpu    .v(), {0, 0, 0});
-                nc_sw_gpt_flux_dn    .insert(sw_gpt_flux_dn_cpu    .v(), {0, 0, 0});
-                nc_sw_gpt_flux_dn_dir.insert(sw_gpt_flux_dn_dir_cpu.v(), {0, 0, 0});
-                nc_sw_gpt_flux_net   .insert(sw_gpt_flux_net_cpu   .v(), {0, 0, 0});
-                
-                nc_sw_gpt_flux_up.add_attribute("long_name","Upwelling shortwave fluxes for g-point "+std::to_string(single_gpt)+" (TwoStream solver)");
-                nc_sw_gpt_flux_up.add_attribute("units","W m-2");
-                
-                nc_sw_gpt_flux_dn.add_attribute("long_name","Downwelling shortwave fluxes for g-point "+std::to_string(single_gpt)+" (TwoStream solver)");
-                nc_sw_gpt_flux_dn.add_attribute("units","W m-2");
-                
-                nc_sw_gpt_flux_dn_dir.add_attribute("long_name","Downwelling direct shortwave fluxes for g-point "+std::to_string(single_gpt)+" (TwoStream solver)");
-                nc_sw_gpt_flux_dn_dir.add_attribute("units","W m-2");
-                
-                nc_sw_gpt_flux_net.add_attribute("long_name","Net shortwave fluxes for g-point "+std::to_string(single_gpt)+" (TwoStream solver)");
-                nc_sw_gpt_flux_net.add_attribute("units","W m-2");
+                auto nc_lw_band_lims_gpt = output_nc.add_variable<int>("lw_band_lims_gpt", {"band_lw", "pair"});
+                nc_lw_band_lims_gpt.insert(rad_lw.get_band_lims_gpoint_gpu().v(), {0, 0});
+    
+                auto nc_lw_tau = output_nc.add_variable<Float>("lw_tau", {"lay", "y", "x"});
+                nc_lw_tau.insert(lw_tau_cpu.v(), {0, 0, 0});
+    
+                auto nc_lay_source     = output_nc.add_variable<Float>("lay_source"    , {"lay", "y", "x"});
+                auto nc_lev_source_inc = output_nc.add_variable<Float>("lev_source_inc", {"lay", "y", "x"});
+                auto nc_lev_source_dec = output_nc.add_variable<Float>("lev_source_dec", {"lay", "y", "x"});
+    
+                auto nc_sfc_source = output_nc.add_variable<Float>("sfc_source", {"y", "x"});
+    
+                nc_lay_source.insert    (lay_source_cpu.v()    , {0, 0, 0});
+                nc_lev_source_inc.insert(lev_source_inc_cpu.v(), {0, 0, 0});
+                nc_lev_source_dec.insert(lev_source_dec_cpu.v(), {0, 0, 0});
+    
+                nc_sfc_source.insert(sfc_source_cpu.v(), {0, 0});
+            }
+    
+            if (switch_fluxes)
+            {
+                auto nc_lw_flux_up  = output_nc.add_variable<Float>("lw_flux_up" , {"lev", "y", "x"});
+                auto nc_lw_flux_dn  = output_nc.add_variable<Float>("lw_flux_dn" , {"lev", "y", "x"});
+                auto nc_lw_flux_net = output_nc.add_variable<Float>("lw_flux_net", {"lev", "y", "x"});
+    
+                nc_lw_flux_up .insert(lw_flux_up_cpu .v(), {0, 0, 0});
+                nc_lw_flux_dn .insert(lw_flux_dn_cpu .v(), {0, 0, 0});
+                nc_lw_flux_net.insert(lw_flux_net_cpu.v(), {0, 0, 0});
+    
+                if (switch_single_gpt)
+                {
+                    auto nc_lw_gpt_flux_up  = output_nc.add_variable<Float>("lw_gpt_flux_up" , {"lev", "y", "x"});
+                    auto nc_lw_gpt_flux_dn  = output_nc.add_variable<Float>("lw_gpt_flux_dn" , {"lev", "y", "x"});
+                    auto nc_lw_gpt_flux_net = output_nc.add_variable<Float>("lw_gpt_flux_net", {"lev", "y", "x"});
+    
+                    nc_lw_gpt_flux_up .insert(lw_gpt_flux_up_cpu.v(), {0, 0, 0});
+                    nc_lw_gpt_flux_dn .insert(lw_gpt_flux_dn_cpu.v(), {0, 0, 0});
+                    nc_lw_gpt_flux_net.insert(lw_gpt_flux_net_cpu.v(), {0, 0, 0});
+                }
             }
         }
+    
+    
+        ////// RUN THE SHORTWAVE SOLVER //////
+        if (switch_shortwave)
+        {
+            // Initialize the solver.
+            Status::print_message("Initializing the shortwave solver.");
+    
+    
+            Gas_concs_gpu gas_concs_gpu(gas_concs);
+            Radiation_solver_shortwave rad_sw(gas_concs_gpu, "coefficients_sw.nc", "cloud_coefficients_sw.nc", "aerosol_optics.nc",iseed);
+    
+            // Read the boundary conditions.
+            const int n_bnd_sw = rad_sw.get_n_bnd_gpu();
+            const int n_gpt_sw = rad_sw.get_n_gpt_gpu();
+    
+            //load Mie LUT first
+            if (switch_cloud_mie)
+            {
+                rad_sw.load_mie_tables("mie_lut_broadband.nc");
+            }
+    
+    
+            Array<Float,1> mu0(input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x}), {n_col});
+            Array<Float,1> azi(input_nc.get_variable<Float>("azi", {n_col_y, n_col_x}), {n_col});
+            Array<Float,2> sfc_alb_dir(input_nc.get_variable<Float>("sfc_alb_dir", {n_col_y, n_col_x, n_bnd_sw}), {n_bnd_sw, n_col});
+            Array<Float,2> sfc_alb_dif(input_nc.get_variable<Float>("sfc_alb_dif", {n_col_y, n_col_x, n_bnd_sw}), {n_bnd_sw, n_col});
+    
+            Array<Float,1> tsi_scaling({n_col});
+            if (input_nc.variable_exists("tsi"))
+            {
+                Array<Float,1> tsi(input_nc.get_variable<Float>("tsi", {n_col_y, n_col_x}), {n_col});
+                const Float tsi_ref = rad_sw.get_tsi_gpu();
+                for (int icol=1; icol<=n_col; ++icol)
+                    tsi_scaling({icol}) = tsi({icol}) / tsi_ref;
+            }
+            else if (input_nc.variable_exists("tsi_scaling"))
+            {
+                Float tsi_scaling_in = input_nc.get_variable<Float>("tsi_scaling");
+                for (int icol=1; icol<=n_col; ++icol)
+                    tsi_scaling({icol}) = tsi_scaling_in;
+            }
+            else
+            {
+                for (int icol=1; icol<=n_col; ++icol)
+                    tsi_scaling({icol}) = Float(1.);
+            }
+    
+            // Create output arrays.
+            Array_gpu<Float,2> sw_tot_tau;
+            Array_gpu<Float,2> sw_tot_ssa;
+            Array_gpu<Float,2> sw_cld_tau;
+            Array_gpu<Float,2> sw_cld_ssa;
+            Array_gpu<Float,2> sw_cld_asy;
+            Array_gpu<Float,2> sw_aer_tau;
+            Array_gpu<Float,2> sw_aer_ssa;
+            Array_gpu<Float,2> sw_aer_asy;
+    
+            if (switch_single_gpt)
+            {
+                sw_tot_tau    .set_dims({n_col, n_lay});
+                sw_tot_ssa    .set_dims({n_col, n_lay});
+                sw_cld_tau    .set_dims({n_col, n_lay});
+                sw_cld_ssa    .set_dims({n_col, n_lay});
+                sw_cld_asy    .set_dims({n_col, n_lay});
+                sw_aer_tau    .set_dims({n_col, n_lay});
+                sw_aer_ssa    .set_dims({n_col, n_lay});
+                sw_aer_asy    .set_dims({n_col, n_lay});
+            }
+    
+            Array_gpu<Float,2> sw_flux_up;
+            Array_gpu<Float,2> sw_flux_dn;
+            Array_gpu<Float,2> sw_flux_dn_dir;
+            Array_gpu<Float,2> sw_flux_net;
+    
+            Array_gpu<Float,2> rt_flux_tod_up;
+            Array_gpu<Float,2> rt_flux_sfc_dir;
+            Array_gpu<Float,2> rt_flux_sfc_dif;
+            Array_gpu<Float,2> rt_flux_sfc_up;
+            Array_gpu<Float,3> rt_flux_abs_dir;
+            Array_gpu<Float,3> rt_flux_abs_dif;
+    
+    
+            if (switch_fluxes)
+            {
+                sw_flux_up    .set_dims({n_col, n_lev});
+                sw_flux_dn    .set_dims({n_col, n_lev});
+                sw_flux_dn_dir.set_dims({n_col, n_lev});
+                sw_flux_net   .set_dims({n_col, n_lev});
+                if (switch_raytracing)
+                {
+                    rt_flux_tod_up .set_dims({n_col_x, n_col_y});
+                    rt_flux_sfc_dir.set_dims({n_col_x, n_col_y});
+                    rt_flux_sfc_dif.set_dims({n_col_x, n_col_y});
+                    rt_flux_sfc_up .set_dims({n_col_x, n_col_y});
+                    rt_flux_abs_dir.set_dims({n_col_x, n_col_y, n_z});
+                    rt_flux_abs_dif.set_dims({n_col_x, n_col_y, n_z});
+                }
+    
+            }
+    
+            Array_gpu<Float,2> sw_gpt_flux_up;
+            Array_gpu<Float,2> sw_gpt_flux_dn;
+            Array_gpu<Float,2> sw_gpt_flux_dn_dir;
+            Array_gpu<Float,2> sw_gpt_flux_net;
+    
+            if (switch_single_gpt)
+            {
+                sw_gpt_flux_up    .set_dims({n_col, n_lev});
+                sw_gpt_flux_dn    .set_dims({n_col, n_lev});
+                sw_gpt_flux_dn_dir.set_dims({n_col, n_lev});
+                sw_gpt_flux_net   .set_dims({n_col, n_lev});
+            }
+    
+    
+            // Solve the radiation.
+            Status::print_message("Solving the shortwave radiation.");
+    
+            auto run_solver = [&]()
+            {
+                Array_gpu<Float,2> p_lay_gpu(p_lay);
+                Array_gpu<Float,2> p_lev_gpu(p_lev);
+                Array_gpu<Float,2> t_lay_gpu(t_lay);
+                Array_gpu<Float,2> t_lev_gpu(t_lev);
+                Array_gpu<Float,2> col_dry_gpu(col_dry);
+                Array_gpu<Float,2> sfc_alb_dir_gpu(sfc_alb_dir);
+                Array_gpu<Float,2> sfc_alb_dif_gpu(sfc_alb_dif);
+                Array_gpu<Float,1> tsi_scaling_gpu(tsi_scaling);
+                Array_gpu<Float,1> mu0_gpu(mu0);
+                Array_gpu<Float,1> azi_gpu(azi);
+                Array_gpu<Float,2> lwp_gpu(lwp);
+                Array_gpu<Float,2> iwp_gpu(iwp);
+                Array_gpu<Float,2> rel_gpu(rel);
+                Array_gpu<Float,2> rei_gpu(rei);
+    
+                Array_gpu<Float,2> rh_gpu(rh);
+                Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
+    
+                cudaDeviceSynchronize();
+                cudaEvent_t start;
+                cudaEvent_t stop;
+                cudaEventCreate(&start);
+                cudaEventCreate(&stop);
+    
+                cudaEventRecord(start, 0);
+    
+                rad_sw.solve_gpu(
+                        switch_fluxes,
+                        switch_raytracing,
+                        switch_independent_column,
+                        switch_cloud_optics,
+                        switch_cloud_mie,
+                        switch_aerosol_optics,
+                        switch_single_gpt,
+                        switch_delta_cloud,
+                        switch_delta_aerosol,
+                        single_gpt,
+                        photons_per_pixel,
+                        grid_cells,
+                        grid_d,
+                        kn_grid,
+                        gas_concs_gpu,
+                        p_lay_gpu, p_lev_gpu,
+                        t_lay_gpu, t_lev_gpu,
+                        col_dry_gpu,
+                        sfc_alb_dir_gpu, sfc_alb_dif_gpu,
+                        tsi_scaling_gpu, mu0_gpu, azi_gpu,
+                        lwp_gpu, iwp_gpu,
+                        rel_gpu, rei_gpu,
+                        rh,
+                        aerosol_concs,
+                        sw_tot_tau, sw_tot_ssa,
+                        sw_cld_tau, sw_cld_ssa, sw_cld_asy,
+                        sw_aer_tau, sw_aer_ssa, sw_aer_asy,
+                        sw_flux_up, sw_flux_dn,
+                        sw_flux_dn_dir, sw_flux_net,
+                        sw_gpt_flux_up, sw_gpt_flux_dn,
+                        sw_gpt_flux_dn_dir, sw_gpt_flux_net,
+                        rt_flux_tod_up,
+                        rt_flux_sfc_dir,
+                        rt_flux_sfc_dif,
+                        rt_flux_sfc_up,
+                        rt_flux_abs_dir,
+                        rt_flux_abs_dif);
+    
+                cudaEventRecord(stop, 0);
+                cudaEventSynchronize(stop);
+                float duration = 0.f;
+                cudaEventElapsedTime(&duration, start, stop);
+    
+                cudaEventDestroy(start);
+                cudaEventDestroy(stop);
+    
+                Status::print_message("Duration shortwave solver: " + std::to_string(duration) + " (ms)");
+            };
+    
+            // Tuning step;
+            run_solver();
+    
+            // Profiling step;
+            if (switch_profiling)
+            {
+                cudaProfilerStart();
+                run_solver();
+                cudaProfilerStop();
+            }
+    
+            // Store the output.
+            Status::print_message("Storing the shortwave output.");
+            Array<Float,2> sw_tot_tau_cpu(sw_tot_tau);
+            Array<Float,2> sw_tot_ssa_cpu(sw_tot_ssa);
+            Array<Float,2> sw_cld_tau_cpu(sw_cld_tau);
+            Array<Float,2> sw_cld_ssa_cpu(sw_cld_ssa);
+            Array<Float,2> sw_cld_asy_cpu(sw_cld_asy);
+            Array<Float,2> sw_aer_tau_cpu(sw_aer_tau);
+            Array<Float,2> sw_aer_ssa_cpu(sw_aer_ssa);
+            Array<Float,2> sw_aer_asy_cpu(sw_aer_asy);
+    
+            Array<Float,2> sw_flux_up_cpu(sw_flux_up);
+            Array<Float,2> sw_flux_dn_cpu(sw_flux_dn);
+            Array<Float,2> sw_flux_dn_dir_cpu(sw_flux_dn_dir);
+            Array<Float,2> sw_flux_net_cpu(sw_flux_net);
+            Array<Float,2> sw_gpt_flux_up_cpu(sw_gpt_flux_up);
+            Array<Float,2> sw_gpt_flux_dn_cpu(sw_gpt_flux_dn);
+            Array<Float,2> sw_gpt_flux_dn_dir_cpu(sw_gpt_flux_dn_dir);
+            Array<Float,2> sw_gpt_flux_net_cpu(sw_gpt_flux_net);
+    
+            Array<Float,2> rt_flux_tod_up_cpu(rt_flux_tod_up);
+            Array<Float,2> rt_flux_sfc_dir_cpu(rt_flux_sfc_dir);
+            Array<Float,2> rt_flux_sfc_dif_cpu(rt_flux_sfc_dif);
+            Array<Float,2> rt_flux_sfc_up_cpu(rt_flux_sfc_up);
+            Array<Float,3> rt_flux_abs_dir_cpu(rt_flux_abs_dir);
+            Array<Float,3> rt_flux_abs_dif_cpu(rt_flux_abs_dif);
+    
+            output_nc.add_dimension("gpt_sw", n_gpt_sw);
+            output_nc.add_dimension("band_sw", n_bnd_sw);
+    
+            auto nc_sw_band_lims_wvn = output_nc.add_variable<Float>("sw_band_lims_wvn", {"band_sw", "pair"});
+            nc_sw_band_lims_wvn.insert(rad_sw.get_band_lims_wavenumber_gpu().v(), {0, 0});
+    
+            if (switch_single_gpt)
+            {
+                auto nc_sw_band_lims_gpt = output_nc.add_variable<int>("sw_band_lims_gpt", {"band_sw", "pair"});
+                nc_sw_band_lims_gpt.insert(rad_sw.get_band_lims_gpoint_gpu().v(), {0, 0});
+    
+                auto nc_tot_tau = output_nc.add_variable<Float>("tot_tau"  , {"lay", "y", "x"});
+                auto nc_tot_ssa = output_nc.add_variable<Float>("tot_ssa"  , {"lay", "y", "x"});
+                auto nc_cld_tau = output_nc.add_variable<Float>("cld_tau"  , {"lay", "y", "x"});
+                auto nc_cld_ssa = output_nc.add_variable<Float>("cld_ssa"  , {"lay", "y", "x"});
+                auto nc_cld_asy = output_nc.add_variable<Float>("cld_asy"  , {"lay", "y", "x"});
+                auto nc_aer_tau = output_nc.add_variable<Float>("aer_tau"  , {"lay", "y", "x"});
+                auto nc_aer_ssa = output_nc.add_variable<Float>("aer_ssa"  , {"lay", "y", "x"});
+                auto nc_aer_asy = output_nc.add_variable<Float>("aer_asy"  , {"lay", "y", "x"});
+    
+                nc_tot_tau.insert(sw_tot_tau_cpu.v(), {0, 0, 0});
+                nc_tot_ssa.insert(sw_tot_ssa_cpu.v(), {0, 0, 0});
+                nc_cld_tau.insert(sw_cld_tau_cpu.v(), {0, 0, 0});
+                nc_cld_ssa.insert(sw_cld_ssa_cpu.v(), {0, 0, 0});
+                nc_cld_asy.insert(sw_cld_asy_cpu.v(), {0, 0, 0});
+                nc_aer_tau.insert(sw_aer_tau_cpu.v(), {0, 0, 0});
+                nc_aer_ssa.insert(sw_aer_ssa_cpu.v(), {0, 0, 0});
+                nc_aer_asy.insert(sw_aer_asy_cpu.v(), {0, 0, 0});
+            
+                nc_tot_tau.add_attribute("long_name","Total optical depth at g-point "+std::to_string(single_gpt));
+                nc_tot_ssa.add_attribute("long_name","Total single scattering albedo at g-point "+std::to_string(single_gpt));
+                nc_cld_tau.add_attribute("long_name","Cloud optical depth at g-point "+std::to_string(single_gpt));
+                nc_cld_ssa.add_attribute("long_name","Cloud single scattering albedo at g-point "+std::to_string(single_gpt));
+                nc_cld_asy.add_attribute("long_name","Cloud asymmetry parameter at g-point "+std::to_string(single_gpt));
+                nc_aer_tau.add_attribute("long_name","Aerosol optical depth at g-point "+std::to_string(single_gpt));
+                nc_aer_ssa.add_attribute("long_name","Aerosol single scattering albedo at g-point "+std::to_string(single_gpt));
+                nc_aer_asy.add_attribute("long_name","Aerosol asymmetry parameter at g-point "+std::to_string(single_gpt));
+                
+                nc_tot_tau.add_attribute("units", "-");
+                nc_tot_ssa.add_attribute("units", "-");
+                nc_cld_tau.add_attribute("units", "-");
+                nc_cld_ssa.add_attribute("units", "-");
+                nc_cld_asy.add_attribute("units", "-");
+                nc_aer_tau.add_attribute("units", "-");
+                nc_aer_ssa.add_attribute("units", "-");
+                nc_aer_asy.add_attribute("units", "-");
+                
+            }
+    
+            if (switch_fluxes)
+            {
+                // auto nc_sw_flux_up     = output_nc.add_variable<Float>("sw_flux_up"    , {"lev", "y", "x"});
+                // auto nc_sw_flux_dn     = output_nc.add_variable<Float>("sw_flux_dn"    , {"lev", "y", "x"});
+                // auto nc_sw_flux_dn_dir = output_nc.add_variable<Float>("sw_flux_dn_dir", {"lev", "y", "x"});
+                // auto nc_sw_flux_net    = output_nc.add_variable<Float>("sw_flux_net"   , {"lev", "y", "x"});
+    
+                // nc_sw_flux_up    .insert(sw_flux_up_cpu    .v(), {0, 0, 0});
+                // nc_sw_flux_dn    .insert(sw_flux_dn_cpu    .v(), {0, 0, 0});
+                // nc_sw_flux_dn_dir.insert(sw_flux_dn_dir_cpu.v(), {0, 0, 0});
+                // nc_sw_flux_net   .insert(sw_flux_net_cpu   .v(), {0, 0, 0});
+    
+                // nc_sw_flux_up.add_attribute("long_name","Upwelling shortwave fluxes (TwoStream solver)");
+                // nc_sw_flux_up.add_attribute("units","W m-2");
+                // 
+                // nc_sw_flux_dn.add_attribute("long_name","Downwelling shortwave fluxes (TwoStream solver)");
+                // nc_sw_flux_dn.add_attribute("units","W m-2");
+                // 
+                // nc_sw_flux_dn_dir.add_attribute("long_name","Downwelling direct shortwave fluxes (TwoStream solver)");
+                // nc_sw_flux_dn_dir.add_attribute("units","W m-2");
+                // 
+                // nc_sw_flux_net.add_attribute("long_name","Net shortwave fluxes (TwoStream solver)");
+                // nc_sw_flux_net.add_attribute("units","W m-2");
+                
+                if (switch_raytracing)
+                {
+                 //   auto nc_rt_flux_tod_up  = output_nc.add_variable<Float>("rt_flux_tod_up",  {"y","x"});
+                    auto nc_rt_flux_sfc_dir = output_nc.add_variable<Float>("rt_flux_sfc_dir", {"y","x"});
+                    auto nc_rt_flux_sfc_dif = output_nc.add_variable<Float>("rt_flux_sfc_dif", {"y","x"});
+                 //   auto nc_rt_flux_sfc_up  = output_nc.add_variable<Float>("rt_flux_sfc_up",  {"y","x"});
+                 //   auto nc_rt_flux_abs_dir = output_nc.add_variable<Float>("rt_flux_abs_dir", {"z","y","x"});
+                 //   auto nc_rt_flux_abs_dif = output_nc.add_variable<Float>("rt_flux_abs_dif", {"z","y","x"});
+    
+                 //   nc_rt_flux_tod_up .insert(rt_flux_tod_up_cpu .v(), {0,0});
+                    nc_rt_flux_sfc_dir.insert(rt_flux_sfc_dir_cpu.v(), {0,0});
+                    nc_rt_flux_sfc_dif.insert(rt_flux_sfc_dif_cpu.v(), {0,0});
+                 //   nc_rt_flux_sfc_up .insert(rt_flux_sfc_up_cpu .v(), {0,0});
+    
+                  //  nc_rt_flux_abs_dir.insert(rt_flux_abs_dir_cpu.v(), {0,0,0});
+                  //  nc_rt_flux_abs_dif.insert(rt_flux_abs_dif_cpu.v(), {0,0,0});
+     
+                  //  nc_rt_flux_tod_up.add_attribute("long_name","Upwelling shortwave top-of-domain fluxes (Monte Carlo ray tracer)");
+                  //  nc_rt_flux_tod_up.add_attribute("units","W m-2");
+                    
+                    nc_rt_flux_sfc_dir.add_attribute("long_name","Downwelling direct shortwave surface fluxes (Monte Carlo ray tracer)");
+                    nc_rt_flux_sfc_dir.add_attribute("units","W m-2");
+                    
+                    nc_rt_flux_sfc_dif.add_attribute("long_name","Downwelling diffuse shortwave surface fluxes (Monte Carlo ray tracer)");
+                    nc_rt_flux_sfc_dif.add_attribute("units","W m-2");
+                    
+                  //  nc_rt_flux_sfc_up.add_attribute("long_name","Upwelling shortwave surface fluxes (Monte Carlo ray tracer)");
+                  //  nc_rt_flux_sfc_up.add_attribute("units","W m-2");
+                    
+                  //  nc_rt_flux_abs_dir.add_attribute("long_name","Absorbed direct shortwave fluxes (Monte Carlo ray tracer)");
+                  //  nc_rt_flux_abs_dir.add_attribute("units","W m-3");
+                
+                  //  nc_rt_flux_abs_dif.add_attribute("long_name","Absorbed diffuse shortwave fluxes (Monte Carlo ray tracer)");
+                  //  nc_rt_flux_abs_dif.add_attribute("units","W m-3");
+    
+                }
+    
+    
+                if (switch_single_gpt)
+                {
+                    auto nc_sw_gpt_flux_up     = output_nc.add_variable<Float>("sw_gpt_flux_up"    , {"lev", "y", "x"});
+                    auto nc_sw_gpt_flux_dn     = output_nc.add_variable<Float>("sw_gpt_flux_dn"    , {"lev", "y", "x"});
+                    auto nc_sw_gpt_flux_dn_dir = output_nc.add_variable<Float>("sw_gpt_flux_dn_dir", {"lev", "y", "x"});
+                    auto nc_sw_gpt_flux_net    = output_nc.add_variable<Float>("sw_gpt_flux_net"   , {"lev", "y", "x"});
+    
+                    nc_sw_gpt_flux_up    .insert(sw_gpt_flux_up_cpu    .v(), {0, 0, 0});
+                    nc_sw_gpt_flux_dn    .insert(sw_gpt_flux_dn_cpu    .v(), {0, 0, 0});
+                    nc_sw_gpt_flux_dn_dir.insert(sw_gpt_flux_dn_dir_cpu.v(), {0, 0, 0});
+                    nc_sw_gpt_flux_net   .insert(sw_gpt_flux_net_cpu   .v(), {0, 0, 0});
+                    
+                    nc_sw_gpt_flux_up.add_attribute("long_name","Upwelling shortwave fluxes for g-point "+std::to_string(single_gpt)+" (TwoStream solver)");
+                    nc_sw_gpt_flux_up.add_attribute("units","W m-2");
+                    
+                    nc_sw_gpt_flux_dn.add_attribute("long_name","Downwelling shortwave fluxes for g-point "+std::to_string(single_gpt)+" (TwoStream solver)");
+                    nc_sw_gpt_flux_dn.add_attribute("units","W m-2");
+                    
+                    nc_sw_gpt_flux_dn_dir.add_attribute("long_name","Downwelling direct shortwave fluxes for g-point "+std::to_string(single_gpt)+" (TwoStream solver)");
+                    nc_sw_gpt_flux_dn_dir.add_attribute("units","W m-2");
+                    
+                    nc_sw_gpt_flux_net.add_attribute("long_name","Net shortwave fluxes for g-point "+std::to_string(single_gpt)+" (TwoStream solver)");
+                    nc_sw_gpt_flux_net.add_attribute("units","W m-2");
+                }
+            }
+        }
+        Status::print_message("###### Finished RTE+RRTMGP solver ######");
     }
-
-    Status::print_message("###### Finished RTE+RRTMGP solver ######");
 }
 
 

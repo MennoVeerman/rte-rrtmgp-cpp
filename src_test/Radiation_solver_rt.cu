@@ -369,6 +369,11 @@ namespace
                 mext_phobic, ssa_phobic, g_phobic,
                 mext_philic, ssa_philic, g_philic);
     }
+
+    Raytracer create_raytracer(int qrng_seed)
+    {
+        return Raytracer(qrng_seed);
+    }
 }
 
 Radiation_solver_longwave::Radiation_solver_longwave(
@@ -530,7 +535,8 @@ Radiation_solver_shortwave::Radiation_solver_shortwave(
         const Gas_concs_gpu& gas_concs,
         const std::string& file_name_gas,
         const std::string& file_name_cloud,
-        const std::string& file_name_aerosol)
+        const std::string& file_name_aerosol,
+        const int qrng_seed)
 {
     // Construct the gas optics classes for the solver.
     this->kdist_gpu = std::make_unique<Gas_optics_rrtmgp_rt>(
@@ -541,6 +547,8 @@ Radiation_solver_shortwave::Radiation_solver_shortwave(
 
     this->aerosol_optics_gpu = std::make_unique<Aerosol_optics_rt>(
             load_and_init_aerosol_optics(file_name_aerosol));
+    
+    this->raytracer = std::make_unique<Raytracer>(create_raytracer(qrng_seed));
 }
 
 void Radiation_solver_shortwave::load_mie_tables(
@@ -796,7 +804,7 @@ void Radiation_solver_shortwave::solve_gpu(
                     mie_angs_sub = mie_angs.subset({{ {1, n_mie}, {1, n_re}, {band, band} }});
                 }
 
-                raytracer.trace_rays(
+                raytracer->trace_rays(
                         igpt,
                         switch_independent_column,
                         ray_count,

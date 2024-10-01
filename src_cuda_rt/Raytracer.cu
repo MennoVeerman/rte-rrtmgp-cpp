@@ -205,7 +205,7 @@ namespace
 }
 
 
-Raytracer::Raytracer()
+Raytracer::Raytracer(int qrng_seed)
 {
     curandDirectionVectors32_t* qrng_vectors;
     curandGetDirectionVectors32(
@@ -217,8 +217,10 @@ Raytracer::Raytracer()
     this->qrng_vectors_gpu = allocate_gpu<curandDirectionVectors32_t>(2);
     this->qrng_constants_gpu = allocate_gpu<unsigned int>(2);
 
-    copy_to_gpu(qrng_vectors_gpu, qrng_vectors, 2);
-    copy_to_gpu(qrng_constants_gpu, qrng_constants, 2);
+    copy_to_gpu(qrng_vectors_gpu, &qrng_vectors[qrng_seed*2], 2);
+    copy_to_gpu(qrng_constants_gpu, &qrng_constants[qrng_seed*2], 2);
+
+    this->qrng_seed = qrng_seed;
 }
 
 
@@ -368,7 +370,9 @@ void Raytracer::trace_rays(
     
     const int mie_table_size = mie_cdf.size();
     
-    const int qrng_gpt_offset = (igpt-1) * rt_kernel_grid_size * rt_kernel_block_size * photons_per_thread;
+    const Int qrng_gpt_offset = (igpt-1) * rt_kernel_grid_size * rt_kernel_block_size * photons_per_thread + 
+                                 qrng_seed * rt_kernel_grid_size * rt_kernel_block_size * photons_per_thread * 150;
+    
     ray_tracer_kernel<<<grid, block,sizeof(Float)*mie_table_size>>>(
             switch_independent_column,
             photons_per_thread,
