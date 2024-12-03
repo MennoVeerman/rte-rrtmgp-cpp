@@ -124,7 +124,8 @@ class Radiation_solver_shortwave
                 const Array_gpu<Float,2>& rh,
                 const Aerosol_concs_gpu& aerosol_concs,
                 Array_gpu<Float,2>& tot_tau_out, Array_gpu<Float,2>& tot_ssa_out, 
-                Array_gpu<Float,2>& cld_tau_out, Array_gpu<Float,2>& cld_ssa_out, Array_gpu<Float,2>& cld_asy_out, 
+                Array_gpu<Float,2>& liq_tau_out, Array_gpu<Float,2>& liq_ssa_out, Array_gpu<Float,2>& liq_asy_out, 
+                Array_gpu<Float,2>& ice_tau_out, Array_gpu<Float,2>& ice_ssa_out, Array_gpu<Float,2>& ice_asy_out, 
                 Array_gpu<Float,2>& aer_tau_out, Array_gpu<Float,2>& aer_ssa_out, Array_gpu<Float,2>& aer_asy_out,
                 Array_gpu<Float,2>& sw_flux_up, Array_gpu<Float,2>& sw_flux_dn,
                 Array_gpu<Float,2>& sw_flux_dn_dir, Array_gpu<Float,2>& sw_flux_net,
@@ -159,11 +160,14 @@ class Radiation_solver_shortwave
 
         std::unique_ptr<Optical_props_arry_rt> optical_props;
 
-        std::unique_ptr<Optical_props_2str_rt> cloud_optical_props;
+        std::unique_ptr<Optical_props_2str_rt> liq_cloud_optical_props;
+        std::unique_ptr<Optical_props_2str_rt> ice_cloud_optical_props;
         std::unique_ptr<Optical_props_2str_rt> aerosol_optical_props;
 
-        Array_gpu<Float,2> mie_cdfs;
-        Array_gpu<Float,3> mie_angs;
+        Array_gpu<Float,2> mie_liq_cdfs;
+        Array_gpu<Float,3> mie_liq_angs;
+        Array_gpu<Float,2> mie_ice_cdfs;
+        Array_gpu<Float,3> mie_ice_angs;
         #endif
 };
 #endif

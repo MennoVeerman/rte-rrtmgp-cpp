@@ -553,15 +553,22 @@ void Radiation_solver_shortwave::load_mie_tables(
         const std::string& file_name_mie)
 {
     Netcdf_file mie_nc(file_name_mie, Netcdf_mode::Read);
-    const int n_re  = mie_nc.get_dimension_size("r_eff");
-    const int n_mie = mie_nc.get_dimension_size("n_ang");
 
     const int n_bnd_sw = this->get_n_bnd_gpu();
-    Array<Float,2> mie_cdf(mie_nc.get_variable<Float>("phase_cdf", {n_bnd_sw, n_mie}), {n_mie, n_bnd_sw});
-    Array<Float,3> mie_ang(mie_nc.get_variable<Float>("phase_cdf_angle", {n_bnd_sw, n_re, n_mie}), {n_mie, n_re, n_bnd_sw});
+    const int n_re_liq  = mie_nc.get_dimension_size("r_eff_liq");
+    const int n_mie_liq = mie_nc.get_dimension_size("n_ang_liq");
+    Array<Float,2> mie_liq_cdf(mie_nc.get_variable<Float>("phase_liq_cdf", {n_bnd_sw, n_mie_liq}), {n_mie_liq, n_bnd_sw});
+    Array<Float,3> mie_liq_ang(mie_nc.get_variable<Float>("phase_liq_cdf_angle", {n_bnd_sw, n_re_liq, n_mie_liq}), {n_mie_liq, n_re_liq, n_bnd_sw});
+    
+    const int n_re_ice  = mie_nc.get_dimension_size("r_eff_ice");
+    const int n_mie_ice = mie_nc.get_dimension_size("n_ang_ice");
+    Array<Float,2> mie_ice_cdf(mie_nc.get_variable<Float>("phase_ice_cdf", {n_bnd_sw, n_mie_ice}), {n_mie_ice, n_bnd_sw});
+    Array<Float,3> mie_ice_ang(mie_nc.get_variable<Float>("phase_ice_cdf_angle", {n_bnd_sw, n_re_ice, n_mie_ice}), {n_mie_ice, n_re_ice, n_bnd_sw});
 
-    this->mie_cdfs = mie_cdf;
-    this->mie_angs = mie_ang;
+    this->mie_liq_cdfs = mie_liq_cdf;
+    this->mie_liq_angs = mie_liq_ang;
+    this->mie_ice_cdfs = mie_ice_cdf;
+    this->mie_ice_angs = mie_ice_ang;
 
 }
 
@@ -592,7 +599,8 @@ void Radiation_solver_shortwave::solve_gpu(
         const Array_gpu<Float,2>& rh,
         const Aerosol_concs_gpu& aerosol_concs,
         Array_gpu<Float,2>& tot_tau_out, Array_gpu<Float,2>& tot_ssa_out,
-        Array_gpu<Float,2>& cld_tau_out, Array_gpu<Float,2>& cld_ssa_out, Array_gpu<Float,2>& cld_asy_out,
+        Array_gpu<Float,2>& liq_tau_out, Array_gpu<Float,2>& liq_ssa_out, Array_gpu<Float,2>& liq_asy_out,
+        Array_gpu<Float,2>& ice_tau_out, Array_gpu<Float,2>& ice_ssa_out, Array_gpu<Float,2>& ice_asy_out,
         Array_gpu<Float,2>& aer_tau_out, Array_gpu<Float,2>& aer_ssa_out, Array_gpu<Float,2>& aer_asy_out,
         Array_gpu<Float,2>& sw_flux_up, Array_gpu<Float,2>& sw_flux_dn,
         Array_gpu<Float,2>& sw_flux_dn_dir, Array_gpu<Float,2>& sw_flux_net,
@@ -611,13 +619,17 @@ void Radiation_solver_shortwave::solve_gpu(
     const int n_gpt = this->kdist_gpu->get_ngpt();
     const int n_bnd = this->kdist_gpu->get_nband();
 
-    const int n_mie = (switch_cloud_mie) ? this->mie_angs.dim(1) : 0;
-    const int n_re = (switch_cloud_mie) ? this->mie_angs.dim(2) : 0;
+    const int n_mie_liq = (switch_cloud_mie) ? this->mie_liq_angs.dim(1) : 0;
+    const int n_re_liq = (switch_cloud_mie) ? this->mie_liq_angs.dim(2) : 0;
+    
+    const int n_mie_ice = (switch_cloud_mie) ? this->mie_ice_angs.dim(1) : 0;
+    const int n_re_ice = (switch_cloud_mie) ? this->mie_ice_angs.dim(2) : 0;
 
     const Bool top_at_1 = p_lay({1, 1}) < p_lay({1, n_lay});
 
     optical_props = std::make_unique<Optical_props_2str_rt>(n_col, n_lay, *kdist_gpu);
-    cloud_optical_props = std::make_unique<Optical_props_2str_rt>(n_col, n_lay, *cloud_optics_gpu);
+    liq_cloud_optical_props = std::make_unique<Optical_props_2str_rt>(n_col, n_lay, *cloud_optics_gpu);
+    ice_cloud_optical_props = std::make_unique<Optical_props_2str_rt>(n_col, n_lay, *cloud_optics_gpu);
     aerosol_optical_props = std::make_unique<Optical_props_2str_rt>(n_col, n_lay, *aerosol_optics_gpu);
 
     if (col_dry.size() == 0)
@@ -631,8 +643,10 @@ void Radiation_solver_shortwave::solve_gpu(
     Array<int,2> cld_mask_liq({n_col, n_lay});
     Array<int,2> cld_mask_ice({n_col, n_lay});
 
-    Array_gpu<Float,2> mie_cdfs_sub;
-    Array_gpu<Float,3> mie_angs_sub;
+    Array_gpu<Float,2> mie_liq_cdfs_sub;
+    Array_gpu<Float,3> mie_liq_angs_sub;
+    Array_gpu<Float,2> mie_ice_cdfs_sub;
+    Array_gpu<Float,3> mie_ice_angs_sub;
 
     if (switch_fluxes)
     {
@@ -744,21 +758,29 @@ void Radiation_solver_shortwave::solve_gpu(
                         iwp,
                         rel,
                         rei,
-                        *cloud_optical_props);
+                        *liq_cloud_optical_props,
+                        *ice_cloud_optical_props);
 
                 if (switch_delta_cloud)
-                    cloud_optical_props->delta_scale();
+                    liq_cloud_optical_props->delta_scale();
+                    ice_cloud_optical_props->delta_scale();
             }
             // Add the cloud optical props to the gas optical properties.
             add_to(
                     dynamic_cast<Optical_props_2str_rt&>(*optical_props),
-                    dynamic_cast<Optical_props_2str_rt&>(*cloud_optical_props));
+                    dynamic_cast<Optical_props_2str_rt&>(*liq_cloud_optical_props));
+            add_to(
+                    dynamic_cast<Optical_props_2str_rt&>(*optical_props),
+                    dynamic_cast<Optical_props_2str_rt&>(*ice_cloud_optical_props));
         }
         else
         {
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col, n_lay, cloud_optical_props->get_tau().ptr());
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col, n_lay, cloud_optical_props->get_ssa().ptr());
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col, n_lay, cloud_optical_props->get_g().ptr());
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col, n_lay, liq_cloud_optical_props->get_tau().ptr());
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col, n_lay, liq_cloud_optical_props->get_ssa().ptr());
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col, n_lay, liq_cloud_optical_props->get_g().ptr());
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col, n_lay, ice_cloud_optical_props->get_tau().ptr());
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col, n_lay, ice_cloud_optical_props->get_ssa().ptr());
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col, n_lay, ice_cloud_optical_props->get_g().ptr());
         }
 
 
@@ -767,9 +789,12 @@ void Radiation_solver_shortwave::solve_gpu(
         {
             tot_tau_out = optical_props->get_tau();
             tot_ssa_out = optical_props->get_ssa();
-            cld_tau_out = cloud_optical_props->get_tau();
-            cld_ssa_out = cloud_optical_props->get_ssa();
-            cld_asy_out = cloud_optical_props->get_g();
+            liq_tau_out = liq_cloud_optical_props->get_tau();
+            liq_ssa_out = liq_cloud_optical_props->get_ssa();
+            liq_asy_out = liq_cloud_optical_props->get_g();
+            ice_tau_out = ice_cloud_optical_props->get_tau();
+            ice_ssa_out = ice_cloud_optical_props->get_ssa();
+            ice_asy_out = ice_cloud_optical_props->get_g();
             aer_tau_out = aerosol_optical_props->get_tau();
             aer_ssa_out = aerosol_optical_props->get_ssa();
             aer_asy_out = aerosol_optical_props->get_g();
@@ -799,8 +824,10 @@ void Radiation_solver_shortwave::solve_gpu(
 
                 if (switch_cloud_mie)
                 {
-                    mie_cdfs_sub = mie_cdfs.subset({{ {1, n_mie}, {band, band} }});
-                    mie_angs_sub = mie_angs.subset({{ {1, n_mie}, {1, n_re}, {band, band} }});
+                    mie_liq_cdfs_sub = mie_liq_cdfs.subset({{ {1, n_mie_liq}, {band, band} }});
+                    mie_liq_angs_sub = mie_liq_angs.subset({{ {1, n_mie_liq}, {1, n_re_liq}, {band, band} }});
+                    mie_ice_cdfs_sub = mie_ice_cdfs.subset({{ {1, n_mie_ice}, {band, band} }});
+                    mie_ice_angs_sub = mie_ice_angs.subset({{ {1, n_mie_ice}, {1, n_re_ice}, {band, band} }});
                 }
 
                 raytracer.trace_rays(
@@ -810,17 +837,23 @@ void Radiation_solver_shortwave::solve_gpu(
                         grid_cells,
                         grid_d,
                         kn_grid,
-                        mie_cdfs_sub,
-                        mie_angs_sub,
+                        mie_liq_cdfs_sub,
+                        mie_liq_angs_sub,
+                        mie_ice_cdfs_sub,
+                        mie_ice_angs_sub,
                         dynamic_cast<Optical_props_2str_rt&>(*optical_props).get_tau(),
                         dynamic_cast<Optical_props_2str_rt&>(*optical_props).get_ssa(),
-                        dynamic_cast<Optical_props_2str_rt&>(*cloud_optical_props).get_tau(),
-                        dynamic_cast<Optical_props_2str_rt&>(*cloud_optical_props).get_ssa(),
-                        dynamic_cast<Optical_props_2str_rt&>(*cloud_optical_props).get_g(),
+                        dynamic_cast<Optical_props_2str_rt&>(*liq_cloud_optical_props).get_tau(),
+                        dynamic_cast<Optical_props_2str_rt&>(*liq_cloud_optical_props).get_ssa(),
+                        dynamic_cast<Optical_props_2str_rt&>(*liq_cloud_optical_props).get_g(),
+                        dynamic_cast<Optical_props_2str_rt&>(*ice_cloud_optical_props).get_tau(),
+                        dynamic_cast<Optical_props_2str_rt&>(*ice_cloud_optical_props).get_ssa(),
+                        dynamic_cast<Optical_props_2str_rt&>(*ice_cloud_optical_props).get_g(),
                         dynamic_cast<Optical_props_2str_rt&>(*aerosol_optical_props).get_tau(),
                         dynamic_cast<Optical_props_2str_rt&>(*aerosol_optical_props).get_ssa(),
                         dynamic_cast<Optical_props_2str_rt&>(*aerosol_optical_props).get_g(),
                         rel,
+                        rei,
                         sfc_alb_dir.subset({{ {band, band}, {1, n_col}}}),
                         zenith_angle,
                         azimuth_angle,

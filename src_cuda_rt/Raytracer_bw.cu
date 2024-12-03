@@ -130,7 +130,7 @@ namespace
     void bundles_optical_props(
             const Vector<int> grid_cells, const int nlay, const Float grid_dz,
             const Float* __restrict__ tau_tot, const Float* __restrict__ ssa_tot,
-            const Float* __restrict__ tau_cld, const Float* __restrict__ ssa_cld, const Float* __restrict__ asy_cld,
+            const Float* __restrict__ tau_liq, const Float* __restrict__ ssa_liq, const Float* __restrict__ asy_liq,
             const Float* __restrict__ tau_aer, const Float* __restrict__ ssa_aer, const Float* __restrict__ asy_aer,
             const Float rayleigh,
             const Float* __restrict__ col_dry, const Float* __restrict__ vmr_h2o,
@@ -143,23 +143,23 @@ namespace
         {
             const int idx = icol_x + icol_y*grid_cells.x + iz*grid_cells.y*grid_cells.x;
 
-            const Float kext_cld = tau_cld[idx] / grid_dz;
+            const Float kext_liq = tau_liq[idx] / grid_dz;
             const Float kext_aer = tau_aer[idx] / grid_dz;
-            const Float ksca_cld = kext_cld * ssa_cld[idx];
+            const Float ksca_liq = kext_liq * ssa_liq[idx];
             const Float ksca_aer = kext_aer * ssa_aer[idx];
             const Float ksca_gas = (rayleigh > 0) ? rayleigh * (1 + vmr_h2o[idx]) * col_dry[idx] / grid_dz :
-                                                    tau_tot[idx] / grid_dz * ssa_tot[idx] - ksca_cld - ksca_aer;
+                                                    tau_tot[idx] / grid_dz * ssa_tot[idx] - ksca_liq - ksca_aer;
 
             const Float kext_tot_old = tau_tot[idx] / grid_dz;
-            const Float kext_gas_old = kext_tot_old - kext_cld - kext_aer;
-            const Float kabs_gas = kext_gas_old - (kext_tot_old * ssa_tot[idx] - ksca_cld - ksca_aer);
+            const Float kext_gas_old = kext_tot_old - kext_liq - kext_aer;
+            const Float kabs_gas = kext_gas_old - (kext_tot_old * ssa_tot[idx] - ksca_liq - ksca_aer);
             const Float kext_gas = kabs_gas + ksca_gas;
 
-            k_ext[idx] = kext_cld + kext_gas + kext_aer;
+            k_ext[idx] = kext_liq + kext_gas + kext_aer;
             scat_asy[idx].k_sca_gas = ksca_gas;
-            scat_asy[idx].k_sca_cld = ksca_cld;
+            scat_asy[idx].k_sca_liq = ksca_liq;
             scat_asy[idx].k_sca_aer = ksca_aer;
-            scat_asy[idx].asy_cld = asy_cld[idx];
+            scat_asy[idx].asy_liq = asy_liq[idx];
             scat_asy[idx].asy_aer = asy_aer[idx];
         }
 
@@ -169,7 +169,7 @@ namespace
     void bundles_optical_props_bb(
             const Vector<int> grid_cells, const int nlay, const Float grid_dz,
             const Float* __restrict__ tau_tot, const Float* __restrict__ ssa_tot,
-            const Float* __restrict__ tau_cld, const Float* __restrict__ ssa_cld, const Float* __restrict__ asy_cld,
+            const Float* __restrict__ tau_liq, const Float* __restrict__ ssa_liq, const Float* __restrict__ asy_liq,
             const Float* __restrict__ tau_aer, const Float* __restrict__ ssa_aer, const Float* __restrict__ asy_aer,
             Float* __restrict__ k_ext, Optics_scat* __restrict__ scat_asy)
      {
@@ -180,17 +180,17 @@ namespace
         if ( (icol_x < grid_cells.x) && (icol_y < grid_cells.y) && (iz < grid_cells.z) )
         {
             const int idx = icol_x + icol_y*grid_cells.x + iz*grid_cells.y*grid_cells.x;
-            const Float kext_cld = tau_cld[idx] / grid_dz;
+            const Float kext_liq = tau_liq[idx] / grid_dz;
             const Float kext_aer = tau_aer[idx] / grid_dz;
             const Float kext_tot = tau_tot[idx] / grid_dz;
-            const Float ksca_cld = kext_cld * ssa_cld[idx];
+            const Float ksca_liq = kext_liq * ssa_liq[idx];
             const Float ksca_aer = kext_aer * ssa_aer[idx];
 
             k_ext[idx] = tau_tot[idx] / grid_dz;
-            scat_asy[idx].k_sca_gas = kext_tot*ssa_tot[idx] - ksca_cld - ksca_aer;
-            scat_asy[idx].k_sca_cld = ksca_cld;
+            scat_asy[idx].k_sca_gas = kext_tot*ssa_tot[idx] - ksca_liq - ksca_aer;
+            scat_asy[idx].k_sca_liq = ksca_liq;
             scat_asy[idx].k_sca_aer = ksca_aer;
-            scat_asy[idx].asy_cld = asy_cld[idx];
+            scat_asy[idx].asy_liq = asy_liq[idx];
             scat_asy[idx].asy_aer = asy_aer[idx];
         }
     }
@@ -200,7 +200,7 @@ namespace
             const Vector<int> grid_cells, const int nbg,
             const Float* __restrict__ z_lev,
             const Float* __restrict__ tau_tot, const Float* __restrict__ ssa_tot,
-            const Float* __restrict__ tau_cld, const Float* __restrict__ ssa_cld, const Float* __restrict__ asy_cld,
+            const Float* __restrict__ tau_liq, const Float* __restrict__ ssa_liq, const Float* __restrict__ asy_liq,
             const Float* __restrict__ tau_aer, const Float* __restrict__ ssa_aer, const Float* __restrict__ asy_aer,
             const Float rayleigh,
             const Float* __restrict__ col_dry, const Float* __restrict__ vmr_h2o,
@@ -212,23 +212,23 @@ namespace
             const int idx = (i+grid_cells.z)*grid_cells.y*grid_cells.x;
             const Float dz = abs(z_lev[i+grid_cells.z+1] - z_lev[i+grid_cells.z]);
 
-            const Float kext_cld = tau_cld[idx] / dz;
+            const Float kext_liq = tau_liq[idx] / dz;
             const Float kext_aer = tau_aer[idx] / dz;
-            const Float ksca_cld = kext_cld * ssa_cld[idx];
+            const Float ksca_liq = kext_liq * ssa_liq[idx];
             const Float ksca_aer = kext_aer * ssa_aer[idx];
             const Float ksca_gas = (rayleigh > 0) ? rayleigh * (1 + vmr_h2o[idx]) * col_dry[idx] / dz :
-                                                    tau_tot[idx] / dz * ssa_tot[idx] - ksca_cld - ksca_aer;
+                                                    tau_tot[idx] / dz * ssa_tot[idx] - ksca_liq - ksca_aer;
 
             const Float kext_tot_old = tau_tot[idx] / dz;
-            const Float kext_gas_old = kext_tot_old - kext_cld  - kext_aer;
-            const Float kabs_gas = kext_gas_old - (kext_tot_old * ssa_tot[idx] - ksca_cld - ksca_aer);
+            const Float kext_gas_old = kext_tot_old - kext_liq  - kext_aer;
+            const Float kabs_gas = kext_gas_old - (kext_tot_old * ssa_tot[idx] - ksca_liq - ksca_aer);
             const Float kext_gas = kabs_gas + ksca_gas;
 
-            k_ext_bg[i] = kext_cld + kext_gas + kext_aer;
+            k_ext_bg[i] = kext_liq + kext_gas + kext_aer;
             scat_asy_bg[i].k_sca_gas = ksca_gas;
-            scat_asy_bg[i].k_sca_cld = ksca_cld;
+            scat_asy_bg[i].k_sca_liq = ksca_liq;
             scat_asy_bg[i].k_sca_aer = ksca_aer;
-            scat_asy_bg[i].asy_cld = asy_cld[idx];
+            scat_asy_bg[i].asy_liq = asy_liq[idx];
             scat_asy_bg[i].asy_aer = asy_aer[idx];
 
             z_lev_bg[i] = z_lev[i + grid_cells.z];
@@ -241,7 +241,7 @@ namespace
             const Vector<int> grid_cells, const int nbg,
             const Float* __restrict__ z_lev,
             const Float* __restrict__ tau_tot, const Float* __restrict__ ssa_tot,
-            const Float* __restrict__ tau_cld, const Float* __restrict__ ssa_cld, const Float* __restrict__ asy_cld,
+            const Float* __restrict__ tau_liq, const Float* __restrict__ ssa_liq, const Float* __restrict__ asy_liq,
             const Float* __restrict__ tau_aer, const Float* __restrict__ ssa_aer, const Float* __restrict__ asy_aer,
             Float* __restrict__ k_ext_bg, Optics_scat* __restrict__ scat_asy_bg, Float* __restrict__ z_lev_bg)
     {
@@ -251,19 +251,19 @@ namespace
             const int idx = (i+grid_cells.z)*grid_cells.y*grid_cells.x;
             const Float dz = abs(z_lev[i+grid_cells.z+1] - z_lev[i+grid_cells.z]);
 
-            const Float kext_cld = tau_cld[idx] / dz;
+            const Float kext_liq = tau_liq[idx] / dz;
             const Float kext_aer = tau_aer[idx] / dz;
             const Float kext_tot = tau_tot[idx] / dz;
 
-            const Float ksca_cld = kext_cld * ssa_cld[idx];
+            const Float ksca_liq = kext_liq * ssa_liq[idx];
             const Float ksca_aer = kext_aer * ssa_aer[idx];
-            const Float ksca_gas = kext_tot * ssa_tot[idx] - ksca_cld - ksca_aer;
+            const Float ksca_gas = kext_tot * ssa_tot[idx] - ksca_liq - ksca_aer;
 
             k_ext_bg[i] = kext_tot;
             scat_asy_bg[i].k_sca_gas = ksca_gas;
-            scat_asy_bg[i].k_sca_cld = ksca_cld;
+            scat_asy_bg[i].k_sca_liq = ksca_liq;
             scat_asy_bg[i].k_sca_aer = ksca_aer;
-            scat_asy_bg[i].asy_cld = asy_cld[idx];
+            scat_asy_bg[i].asy_liq = asy_liq[idx];
             scat_asy_bg[i].asy_aer = asy_aer[idx];
 
             z_lev_bg[i] = z_lev[i + grid_cells.z];

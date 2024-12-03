@@ -17,9 +17,11 @@ namespace Raytracer_definitions
     struct Optics_scat
     {
         Float k_sca_gas;
-        Float k_sca_cld;
+        Float k_sca_liq;
+        Float k_sca_ice;
         Float k_sca_aer;
-        Float asy_cld;
+        Float asy_liq;
+        Float asy_ice;
         Float asy_aer;
     };
 

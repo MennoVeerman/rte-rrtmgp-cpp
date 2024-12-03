@@ -79,7 +79,8 @@ namespace
     void bundles_optical_props(
             const Vector<int> grid_cells, const Vector<Float> grid_d,
             const Float* __restrict__ tau_tot, const Float* __restrict__ ssa_tot,
-            const Float* __restrict__ tau_cld, const Float* __restrict__ ssa_cld, const Float* __restrict__ asy_cld,
+            const Float* __restrict__ tau_liq, const Float* __restrict__ ssa_liq, const Float* __restrict__ asy_liq,
+            const Float* __restrict__ tau_ice, const Float* __restrict__ ssa_ice, const Float* __restrict__ asy_ice,
             const Float* __restrict__ tau_aer, const Float* __restrict__ ssa_aer, const Float* __restrict__ asy_aer,
             Float* __restrict__ k_ext, Optics_scat* __restrict__ scat_asy)
     {
@@ -91,18 +92,22 @@ namespace
         {
             const int idx = icol_x + icol_y*grid_cells.x + iz*grid_cells.y*grid_cells.x;
             const Float kext_tot = tau_tot[idx] / grid_d.z;
-            const Float kext_cld = tau_cld[idx] / grid_d.z;
+            const Float kext_liq = tau_liq[idx] / grid_d.z;
+            const Float kext_ice = tau_ice[idx] / grid_d.z;
             const Float kext_aer = tau_aer[idx] / grid_d.z;
-            const Float ksca_cld = kext_cld * ssa_cld[idx];
+            const Float ksca_liq = kext_liq * ssa_liq[idx];
+            const Float ksca_ice = kext_ice * ssa_ice[idx];
             const Float ksca_aer = kext_aer * ssa_aer[idx];
-            const Float ksca_gas = kext_tot * ssa_tot[idx] - ksca_cld - ksca_aer;
+            const Float ksca_gas = kext_tot * ssa_tot[idx] - ksca_liq - ksca_ice - ksca_aer;
 
             k_ext[idx] = tau_tot[idx] / grid_d.z;
 
             scat_asy[idx].k_sca_gas = ksca_gas;
-            scat_asy[idx].k_sca_cld = ksca_cld;
+            scat_asy[idx].k_sca_liq = ksca_liq;
+            scat_asy[idx].k_sca_ice = ksca_ice;
             scat_asy[idx].k_sca_aer = ksca_aer;
-            scat_asy[idx].asy_cld = asy_cld[idx];
+            scat_asy[idx].asy_liq = asy_liq[idx];
+            scat_asy[idx].asy_ice = asy_ice[idx];
             scat_asy[idx].asy_aer = asy_aer[idx];
         }
     }
@@ -112,7 +117,8 @@ namespace
     void bundles_optical_props_tod(
             const Vector<int> grid_cells, const Vector<Float> grid_d, const int n_lev,
             const Float* __restrict__ tau_tot, const Float* __restrict__ ssa_tot,
-            const Float* __restrict__ tau_cld, const Float* __restrict__ ssa_cld, const Float* __restrict__ asy_cld,
+            const Float* __restrict__ tau_liq, const Float* __restrict__ ssa_liq, const Float* __restrict__ asy_liq,
+            const Float* __restrict__ tau_ice, const Float* __restrict__ ssa_ice, const Float* __restrict__ asy_ice,
             const Float* __restrict__ tau_aer, const Float* __restrict__ ssa_aer, const Float* __restrict__ asy_aer,
             Float* __restrict__ k_ext, Optics_scat* __restrict__ scat_asy)
     {
@@ -126,8 +132,11 @@ namespace
             Float tau_tot_sum = Float(0.);
             Float tausca_tot_sum = Float(0.);
 
-            Float tausca_cld_sum = Float(0.);
-            Float tauscag_cld_sum = Float(0.);
+            Float tausca_liq_sum = Float(0.);
+            Float tauscag_liq_sum = Float(0.);
+            
+            Float tausca_ice_sum = Float(0.);
+            Float tauscag_ice_sum = Float(0.);
 
             Float tausca_aer_sum = Float(0.);
             Float tauscag_aer_sum = Float(0.);
@@ -139,8 +148,11 @@ namespace
                 tau_tot_sum += tau_tot[idx];
                 tausca_tot_sum += tau_tot[idx] * ssa_tot[idx];
 
-                tausca_cld_sum += tau_cld[idx] * ssa_cld[idx];
-                tauscag_cld_sum += tau_cld[idx] * ssa_cld[idx] * asy_cld[idx];
+                tausca_liq_sum += tau_liq[idx] * ssa_liq[idx];
+                tauscag_liq_sum += tau_liq[idx] * ssa_liq[idx] * asy_liq[idx];
+                
+                tausca_ice_sum += tau_ice[idx] * ssa_ice[idx];
+                tauscag_ice_sum += tau_ice[idx] * ssa_ice[idx] * asy_ice[idx];
 
                 tausca_aer_sum += tau_aer[idx] * ssa_aer[idx];
                 tauscag_aer_sum += tau_aer[idx] * ssa_aer[idx] * asy_aer[idx];
@@ -150,17 +162,20 @@ namespace
 
             const Float kext_tot = tau_tot_sum / grid_d.z;
 
-            const Float ksca_cld = tausca_cld_sum / grid_d.z;
+            const Float ksca_liq = tausca_liq_sum / grid_d.z;
+            const Float ksca_ice = tausca_ice_sum / grid_d.z;
             const Float ksca_aer = tausca_aer_sum / grid_d.z;
-            const Float ksca_gas = tausca_tot_sum / grid_d.z - ksca_cld - ksca_aer;
+            const Float ksca_gas = tausca_tot_sum / grid_d.z - ksca_liq - ksca_ice - ksca_aer;
 
             k_ext[idx] = kext_tot;
 
             scat_asy[idx].k_sca_gas = ksca_gas;
-            scat_asy[idx].k_sca_cld = ksca_cld;
+            scat_asy[idx].k_sca_liq = ksca_liq;
+            scat_asy[idx].k_sca_ice = ksca_ice;
             scat_asy[idx].k_sca_aer = ksca_aer;
 
-            scat_asy[idx].asy_cld = tauscag_cld_sum / tausca_cld_sum;
+            scat_asy[idx].asy_liq = tauscag_liq_sum / tausca_liq_sum;
+            scat_asy[idx].asy_ice = tauscag_ice_sum / tausca_ice_sum;
             scat_asy[idx].asy_aer = tauscag_aer_sum / tausca_aer_sum;
         }
     }
@@ -236,17 +251,23 @@ void Raytracer::trace_rays(
         const Vector<int> grid_cells,
         const Vector<Float> grid_d,
         const Vector<int> kn_grid,
-        const Array_gpu<Float,2>& mie_cdf,
-        const Array_gpu<Float,3>& mie_ang,
+        const Array_gpu<Float,2>& mie_liq_cdf,
+        const Array_gpu<Float,3>& mie_liq_ang,
+        const Array_gpu<Float,2>& mie_ice_cdf,
+        const Array_gpu<Float,3>& mie_ice_ang,
         const Array_gpu<Float,2>& tau_total,
         const Array_gpu<Float,2>& ssa_total,
-        const Array_gpu<Float,2>& tau_cloud,
-        const Array_gpu<Float,2>& ssa_cloud,
-        const Array_gpu<Float,2>& asy_cloud,
+        const Array_gpu<Float,2>& tau_liq,
+        const Array_gpu<Float,2>& ssa_liq,
+        const Array_gpu<Float,2>& asy_liq,
+        const Array_gpu<Float,2>& tau_ice,
+        const Array_gpu<Float,2>& ssa_ice,
+        const Array_gpu<Float,2>& asy_ice,
         const Array_gpu<Float,2>& tau_aeros,
         const Array_gpu<Float,2>& ssa_aeros,
         const Array_gpu<Float,2>& asy_aeros,
-        const Array_gpu<Float,2>& r_eff,
+        const Array_gpu<Float,2>& re_liq,
+        const Array_gpu<Float,2>& re_ice,
         const Array_gpu<Float,2>& surface_albedo,
         const Float zenith_angle,
         const Float azimuth_angle,
@@ -284,7 +305,8 @@ void Raytracer::trace_rays(
     bundles_optical_props<<<grid_3d, block_3d>>>(
             grid_cells, grid_d,
             tau_total.ptr(), ssa_total.ptr(),
-            tau_cloud.ptr(), ssa_cloud.ptr(), asy_cloud.ptr(),
+            tau_liq.ptr(), ssa_liq.ptr(), asy_liq.ptr(),
+            tau_ice.ptr(), ssa_ice.ptr(), asy_ice.ptr(),
             tau_aeros.ptr(), ssa_aeros.ptr(), asy_aeros.ptr(),
             k_ext.ptr(), scat_asy.ptr());
 
@@ -292,7 +314,8 @@ void Raytracer::trace_rays(
     bundles_optical_props_tod<<<grid_2d, block_2d>>>(
             grid_cells, grid_d, n_lay,
             tau_total.ptr(), ssa_total.ptr(),
-            tau_cloud.ptr(), ssa_cloud.ptr(), asy_cloud.ptr(),
+            tau_liq.ptr(), ssa_liq.ptr(), asy_liq.ptr(),
+            tau_ice.ptr(), ssa_ice.ptr(), asy_ice.ptr(),
             tau_aeros.ptr(), ssa_aeros.ptr(), asy_aeros.ptr(),
             k_ext.ptr(), scat_asy.ptr());
 
@@ -373,10 +396,11 @@ void Raytracer::trace_rays(
     dim3 grid(rt_kernel_grid_size);
     dim3 block(rt_kernel_block_size);
 
-    const int mie_table_size = mie_cdf.size();
+    const int mie_liq_table_size = mie_liq_cdf.size();
+    const int mie_ice_table_size = mie_ice_cdf.size();
 
-    const int qrng_gpt_offset = (igpt-1) * rt_kernel_grid_size * rt_kernel_block_size * photons_per_thread;
-    ray_tracer_kernel<<<grid, block,sizeof(Float)*mie_table_size>>>(
+    const Int qrng_gpt_offset = (igpt-1) * rt_kernel_grid_size * rt_kernel_block_size * photons_per_thread;
+    ray_tracer_kernel<<<grid, block,sizeof(Float)*(mie_liq_table_size+mie_ice_table_size)>>>(
             switch_independent_column,
             photons_per_thread,
             qrng_grid_x,
@@ -391,14 +415,16 @@ void Raytracer::trace_rays(
             atmos_direct_count.ptr(),
             atmos_diffuse_count.ptr(),
             k_ext.ptr(), scat_asy.ptr(),
-            r_eff.ptr(),
+            re_liq.ptr(),
+            re_ice.ptr(),
             tod_inc_direct,
             tod_inc_diffuse,
             surface_albedo.ptr(),
             grid_size, grid_d, grid_cells, kn_grid,
             sun_direction,
             this->qrng_vectors_gpu, this->qrng_constants_gpu,
-            mie_cdf.ptr(), mie_ang.ptr(), mie_table_size);
+            mie_liq_cdf.ptr(), mie_liq_ang.ptr(), mie_liq_table_size,
+            mie_ice_cdf.ptr(), mie_ice_ang.ptr(), mie_ice_table_size);
 
     // convert counts to fluxes
 

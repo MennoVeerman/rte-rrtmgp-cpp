@@ -53,7 +53,8 @@ class Cloud_optics_rt : public Optical_props_rt
                 const int ibnd,
                 const Array_gpu<Float,2>& clwp, const Array_gpu<Float,2>& ciwp,
                 const Array_gpu<Float,2>& reliq, const Array_gpu<Float,2>& reice,
-                Optical_props_2str_rt& optical_props);
+                Optical_props_2str_rt& optical_props_liq,
+                Optical_props_2str_rt& optical_props_ice);
 
     private:
         int liq_nsteps;

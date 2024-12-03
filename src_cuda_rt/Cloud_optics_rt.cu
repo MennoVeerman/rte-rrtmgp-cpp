@@ -87,6 +87,21 @@ namespace
     }
 
     __global__
+    void ssa_asy_inplace_kernel(const int ncol, const int nlay, const Float tmin,
+                  Float* __restrict__ tau, Float* __restrict__ taussa, Float* __restrict__ taussag)
+    {
+        const int icol = blockIdx.x*blockDim.x + threadIdx.x;
+        const int ilay = blockIdx.y*blockDim.y + threadIdx.y;
+
+        if ( (icol < ncol) && (ilay < nlay) )
+        {
+            const int idx = icol + ilay*ncol;
+            taussag[idx] /= taussa[idx];
+            taussa[idx] /= tau[idx];
+        }
+    }
+    
+    __global__
     void combine_and_store_kernel(const int ncol, const int nlay, const Float tmin,
                   Float* __restrict__ tau, Float* __restrict__ ssa, Float* __restrict__ g,
                   const Float* __restrict__ ltau, const Float* __restrict__ ltaussa, const Float* __restrict__ ltaussag,
@@ -180,13 +195,11 @@ void Cloud_optics_rt::cloud_optics(
         const int ibnd,
         const Array_gpu<Float,2>& clwp, const Array_gpu<Float,2>& ciwp,
         const Array_gpu<Float,2>& reliq, const Array_gpu<Float,2>& reice,
-        Optical_props_2str_rt& optical_props)
+        Optical_props_2str_rt& optical_props_liq,
+        Optical_props_2str_rt& optical_props_ice)
 {
     const int ncol = clwp.dim(1);
     const int nlay = clwp.dim(2);
-
-    Optical_props_2str_rt clouds_liq(ncol, nlay, optical_props);
-    Optical_props_2str_rt clouds_ice(ncol, nlay, optical_props);
 
     // Set the mask.
     constexpr Float mask_min_value = Float(0.);
@@ -230,22 +243,24 @@ void Cloud_optics_rt::cloud_optics(
             ncol, nlay, ibnd-1, liqmsk.ptr(), clwp.ptr(), reliq.ptr(),
             this->liq_nsteps, this->liq_step_size, this->radliq_lwr,
             this->lut_extliq_gpu.ptr(), this->lut_ssaliq_gpu.ptr(),
-            this->lut_asyliq_gpu.ptr(), ltau.ptr(), ltaussa.ptr(), ltaussag.ptr());
+            this->lut_asyliq_gpu.ptr(), optical_props_liq.get_tau().ptr(), optical_props_liq.get_ssa().ptr(), optical_props_liq.get_g().ptr());
 
     // Ice.
     compute_from_table_kernel<<<grid_gpu, block_gpu>>>(
             ncol, nlay, ibnd-1, icemsk.ptr(), ciwp.ptr(), reice.ptr(),
             this->ice_nsteps, this->ice_step_size, this->radice_lwr,
             this->lut_extice_gpu.ptr(), this->lut_ssaice_gpu.ptr(),
-            this->lut_asyice_gpu.ptr(), itau.ptr(), itaussa.ptr(), itaussag.ptr());
+            this->lut_asyice_gpu.ptr(), optical_props_ice.get_tau().ptr(), optical_props_ice.get_ssa().ptr(), optical_props_ice.get_g().ptr());
 
     constexpr Float eps = std::numeric_limits<Float>::epsilon();
 
-    combine_and_store_kernel<<<grid_gpu, block_gpu>>>(
+    ssa_asy_inplace_kernel<<<grid_gpu, block_gpu>>>(
             ncol, nlay, eps,
-            optical_props.get_tau().ptr(), optical_props.get_ssa().ptr(), optical_props.get_g().ptr(),
-            ltau.ptr(), ltaussa.ptr(), ltaussag.ptr(),
-            itau.ptr(), itaussa.ptr(), itaussag.ptr());
+            optical_props_liq.get_tau().ptr(), optical_props_liq.get_ssa().ptr(), optical_props_liq.get_g().ptr());
+    
+    ssa_asy_inplace_kernel<<<grid_gpu, block_gpu>>>(
+            ncol, nlay, eps,
+            optical_props_ice.get_tau().ptr(), optical_props_ice.get_ssa().ptr(), optical_props_ice.get_g().ptr());
 }
 
 // 1scl variant of cloud optics.

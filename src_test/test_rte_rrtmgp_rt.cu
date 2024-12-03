@@ -668,9 +668,12 @@ void solve_radiation(int argc, char** argv)
         // Create output arrays.
         Array_gpu<Float,2> sw_tot_tau;
         Array_gpu<Float,2> sw_tot_ssa;
-        Array_gpu<Float,2> sw_cld_tau;
-        Array_gpu<Float,2> sw_cld_ssa;
-        Array_gpu<Float,2> sw_cld_asy;
+        Array_gpu<Float,2> sw_liq_tau;
+        Array_gpu<Float,2> sw_liq_ssa;
+        Array_gpu<Float,2> sw_liq_asy;
+        Array_gpu<Float,2> sw_ice_tau;
+        Array_gpu<Float,2> sw_ice_ssa;
+        Array_gpu<Float,2> sw_ice_asy;
         Array_gpu<Float,2> sw_aer_tau;
         Array_gpu<Float,2> sw_aer_ssa;
         Array_gpu<Float,2> sw_aer_asy;
@@ -679,9 +682,12 @@ void solve_radiation(int argc, char** argv)
         {
             sw_tot_tau    .set_dims({n_col, n_lay});
             sw_tot_ssa    .set_dims({n_col, n_lay});
-            sw_cld_tau    .set_dims({n_col, n_lay});
-            sw_cld_ssa    .set_dims({n_col, n_lay});
-            sw_cld_asy    .set_dims({n_col, n_lay});
+            sw_liq_tau    .set_dims({n_col, n_lay});
+            sw_liq_ssa    .set_dims({n_col, n_lay});
+            sw_liq_asy    .set_dims({n_col, n_lay});
+            sw_ice_tau    .set_dims({n_col, n_lay});
+            sw_ice_ssa    .set_dims({n_col, n_lay});
+            sw_ice_asy    .set_dims({n_col, n_lay});
             sw_aer_tau    .set_dims({n_col, n_lay});
             sw_aer_ssa    .set_dims({n_col, n_lay});
             sw_aer_asy    .set_dims({n_col, n_lay});
@@ -790,7 +796,8 @@ void solve_radiation(int argc, char** argv)
                     rh,
                     aerosol_concs,
                     sw_tot_tau, sw_tot_ssa,
-                    sw_cld_tau, sw_cld_ssa, sw_cld_asy,
+                    sw_liq_tau, sw_liq_ssa, sw_liq_asy,
+                    sw_ice_tau, sw_ice_ssa, sw_ice_asy,
                     sw_aer_tau, sw_aer_ssa, sw_aer_asy,
                     sw_flux_up, sw_flux_dn,
                     sw_flux_dn_dir, sw_flux_net,
@@ -829,9 +836,12 @@ void solve_radiation(int argc, char** argv)
         Status::print_message("Storing the shortwave output.");
         Array<Float,2> sw_tot_tau_cpu(sw_tot_tau);
         Array<Float,2> sw_tot_ssa_cpu(sw_tot_ssa);
-        Array<Float,2> sw_cld_tau_cpu(sw_cld_tau);
-        Array<Float,2> sw_cld_ssa_cpu(sw_cld_ssa);
-        Array<Float,2> sw_cld_asy_cpu(sw_cld_asy);
+        Array<Float,2> sw_liq_tau_cpu(sw_liq_tau);
+        Array<Float,2> sw_liq_ssa_cpu(sw_liq_ssa);
+        Array<Float,2> sw_liq_asy_cpu(sw_liq_asy);
+        Array<Float,2> sw_ice_tau_cpu(sw_ice_tau);
+        Array<Float,2> sw_ice_ssa_cpu(sw_ice_ssa);
+        Array<Float,2> sw_ice_asy_cpu(sw_ice_asy);
         Array<Float,2> sw_aer_tau_cpu(sw_aer_tau);
         Array<Float,2> sw_aer_ssa_cpu(sw_aer_ssa);
         Array<Float,2> sw_aer_asy_cpu(sw_aer_asy);
@@ -865,36 +875,48 @@ void solve_radiation(int argc, char** argv)
 
             auto nc_tot_tau = output_nc.add_variable<Float>("tot_tau"  , {"lay", "y", "x"});
             auto nc_tot_ssa = output_nc.add_variable<Float>("tot_ssa"  , {"lay", "y", "x"});
-            auto nc_cld_tau = output_nc.add_variable<Float>("cld_tau"  , {"lay", "y", "x"});
-            auto nc_cld_ssa = output_nc.add_variable<Float>("cld_ssa"  , {"lay", "y", "x"});
-            auto nc_cld_asy = output_nc.add_variable<Float>("cld_asy"  , {"lay", "y", "x"});
+            auto nc_liq_tau = output_nc.add_variable<Float>("liq_tau"  , {"lay", "y", "x"});
+            auto nc_liq_ssa = output_nc.add_variable<Float>("liq_ssa"  , {"lay", "y", "x"});
+            auto nc_liq_asy = output_nc.add_variable<Float>("liq_asy"  , {"lay", "y", "x"});
+            auto nc_ice_tau = output_nc.add_variable<Float>("ice_tau"  , {"lay", "y", "x"});
+            auto nc_ice_ssa = output_nc.add_variable<Float>("ice_ssa"  , {"lay", "y", "x"});
+            auto nc_ice_asy = output_nc.add_variable<Float>("ice_asy"  , {"lay", "y", "x"});
             auto nc_aer_tau = output_nc.add_variable<Float>("aer_tau"  , {"lay", "y", "x"});
             auto nc_aer_ssa = output_nc.add_variable<Float>("aer_ssa"  , {"lay", "y", "x"});
             auto nc_aer_asy = output_nc.add_variable<Float>("aer_asy"  , {"lay", "y", "x"});
 
             nc_tot_tau.insert(sw_tot_tau_cpu.v(), {0, 0, 0});
             nc_tot_ssa.insert(sw_tot_ssa_cpu.v(), {0, 0, 0});
-            nc_cld_tau.insert(sw_cld_tau_cpu.v(), {0, 0, 0});
-            nc_cld_ssa.insert(sw_cld_ssa_cpu.v(), {0, 0, 0});
-            nc_cld_asy.insert(sw_cld_asy_cpu.v(), {0, 0, 0});
+            nc_liq_tau.insert(sw_liq_tau_cpu.v(), {0, 0, 0});
+            nc_liq_ssa.insert(sw_liq_ssa_cpu.v(), {0, 0, 0});
+            nc_liq_asy.insert(sw_liq_asy_cpu.v(), {0, 0, 0});
+            nc_ice_tau.insert(sw_ice_tau_cpu.v(), {0, 0, 0});
+            nc_ice_ssa.insert(sw_ice_ssa_cpu.v(), {0, 0, 0});
+            nc_ice_asy.insert(sw_ice_asy_cpu.v(), {0, 0, 0});
             nc_aer_tau.insert(sw_aer_tau_cpu.v(), {0, 0, 0});
             nc_aer_ssa.insert(sw_aer_ssa_cpu.v(), {0, 0, 0});
             nc_aer_asy.insert(sw_aer_asy_cpu.v(), {0, 0, 0});
 
             nc_tot_tau.add_attribute("long_name","Total optical depth at g-point "+std::to_string(single_gpt));
             nc_tot_ssa.add_attribute("long_name","Total single scattering albedo at g-point "+std::to_string(single_gpt));
-            nc_cld_tau.add_attribute("long_name","Cloud optical depth at g-point "+std::to_string(single_gpt));
-            nc_cld_ssa.add_attribute("long_name","Cloud single scattering albedo at g-point "+std::to_string(single_gpt));
-            nc_cld_asy.add_attribute("long_name","Cloud asymmetry parameter at g-point "+std::to_string(single_gpt));
+            nc_liq_tau.add_attribute("long_name","Liquid cloud optical depth at g-point "+std::to_string(single_gpt));
+            nc_liq_ssa.add_attribute("long_name","Liquid cloud single scattering albedo at g-point "+std::to_string(single_gpt));
+            nc_liq_asy.add_attribute("long_name","Liquid cloud asymmetry parameter at g-point "+std::to_string(single_gpt));
+            nc_ice_tau.add_attribute("long_name","Liquid cloud optical depth at g-point "+std::to_string(single_gpt));
+            nc_ice_ssa.add_attribute("long_name","Liquid cloud single scattering albedo at g-point "+std::to_string(single_gpt));
+            nc_ice_asy.add_attribute("long_name","Liquid cloud asymmetry parameter at g-point "+std::to_string(single_gpt));
             nc_aer_tau.add_attribute("long_name","Aerosol optical depth at g-point "+std::to_string(single_gpt));
             nc_aer_ssa.add_attribute("long_name","Aerosol single scattering albedo at g-point "+std::to_string(single_gpt));
             nc_aer_asy.add_attribute("long_name","Aerosol asymmetry parameter at g-point "+std::to_string(single_gpt));
 
             nc_tot_tau.add_attribute("units", "-");
             nc_tot_ssa.add_attribute("units", "-");
-            nc_cld_tau.add_attribute("units", "-");
-            nc_cld_ssa.add_attribute("units", "-");
-            nc_cld_asy.add_attribute("units", "-");
+            nc_liq_tau.add_attribute("units", "-");
+            nc_liq_ssa.add_attribute("units", "-");
+            nc_liq_asy.add_attribute("units", "-");
+            nc_ice_tau.add_attribute("units", "-");
+            nc_ice_ssa.add_attribute("units", "-");
+            nc_ice_asy.add_attribute("units", "-");
             nc_aer_tau.add_attribute("units", "-");
             nc_aer_ssa.add_attribute("units", "-");
             nc_aer_asy.add_attribute("units", "-");

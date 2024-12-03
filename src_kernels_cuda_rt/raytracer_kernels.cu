@@ -134,7 +134,8 @@ void ray_tracer_kernel(
         Float* __restrict__ atmos_diffuse_count,
         const Float* __restrict__ k_ext,
         const Optics_scat* __restrict__ scat_asy,
-        const Float* __restrict__ r_eff,
+        const Float* __restrict__ re_liq,
+        const Float* __restrict__ re_ice,
         const Float tod_inc_direct,
         const Float tod_inc_diffuse,
         const Float* __restrict__ surface_albedo,
@@ -144,16 +145,29 @@ void ray_tracer_kernel(
         const Vector<int> kn_grid,
         const Vector<Float> sun_direction,
         curandDirectionVectors32_t* qrng_vectors, unsigned int* qrng_constants,
-        const Float* __restrict__ mie_cdf,
-        const Float* __restrict__ mie_ang,
-        const int mie_table_size)
+        const Float* __restrict__ mie_liq_cdf,
+        const Float* __restrict__ mie_liq_ang,
+        const int mie_liq_table_size,
+        const Float* __restrict__ mie_ice_cdf,
+        const Float* __restrict__ mie_ice_ang,
+        const int mie_ice_table_size)
 {
-    extern __shared__ Float mie_cdf_shared[];
-    if (threadIdx.x==0 && mie_table_size > 0)
+    extern __shared__ Float shared_arrays[];
+    Float* mie_liq_cdf_shared = &shared_arrays[0];
+    Float* mie_ice_cdf_shared = &shared_arrays[mie_liq_table_size];
+    if (threadIdx.x==0 && mie_liq_table_size > 0)
     {
-        for (int mie_i=0; mie_i<mie_table_size; ++mie_i)
+        for (int mie_i=0; mie_i<mie_liq_table_size; ++mie_i)
         {
-            mie_cdf_shared[mie_i] = mie_cdf[mie_i];
+            mie_liq_cdf_shared[mie_i] = mie_liq_cdf[mie_i];
+        }
+    }
+    
+    if (threadIdx.x==0 && mie_ice_table_size > 0)
+    {
+        for (int mie_i=0; mie_i<mie_ice_table_size; ++mie_i)
+        {
+            mie_ice_cdf_shared[mie_i] = mie_ice_cdf[mie_i];
         }
     }
 
@@ -356,7 +370,7 @@ void ray_tracer_kernel(
             const int ijk = i + j*grid_cells.x + k*grid_cells.x*grid_cells.y;
 
             // Compute probability not being absorbed and store weighted absorption probability
-            const Float k_sca_tot = scat_asy[ijk].k_sca_gas + scat_asy[ijk].k_sca_cld + scat_asy[ijk].k_sca_aer;
+            const Float k_sca_tot = scat_asy[ijk].k_sca_gas + scat_asy[ijk].k_sca_liq + scat_asy[ijk].k_sca_ice + scat_asy[ijk].k_sca_aer;
             const Float ssa_tot = k_sca_tot / k_ext[ijk];
 
             const Float f_no_abs = Float(1.) - (Float(1.) - ssa_tot) * (k_ext[ijk]/k_ext_null);
@@ -388,29 +402,35 @@ void ray_tracer_kernel(
                 {
                     d_max = Float(0.);
                     // find scatter type: 0 = gas, 1 = cloud, 2 = aerosol
-                    const Float scatter_rng = rng();
-                    const int scatter_type = scatter_rng < (scat_asy[ijk].k_sca_aer/k_sca_tot) ? 2 :
-                                             scatter_rng < ((scat_asy[ijk].k_sca_aer+scat_asy[ijk].k_sca_cld)/k_sca_tot) ? 1 : 0;
                     Float g;
-                    switch (scatter_type)
+                    Float cos_scat;
+                    const Float scatter_rng = rng();
+                    
+                    if (scatter_rng < (scat_asy[ijk].k_sca_aer/k_sca_tot))
                     {
-                        case 0:
-                            g = Float(0.);
-                            break;
-                        case 1:
-                            g = min(Float(1.) - Float_epsilon, scat_asy[ijk].asy_cld);
-                            break;
-                        case 2:
-                            g = min(Float(1.) - Float_epsilon, scat_asy[ijk].asy_aer);
-                            break;
+                        //aerosols
+                        g = min(Float(1.) - Float_epsilon, scat_asy[ijk].asy_aer);
+                        cos_scat = henyey(g,rng());
+                    }
+                    else if (scatter_rng < ((scat_asy[ijk].k_sca_aer+scat_asy[ijk].k_sca_liq)/k_sca_tot))
+                    {
+                        //liquid clouds
+                        g = min(Float(1.) - Float_epsilon, scat_asy[ijk].asy_liq);
+                        cos_scat = (mie_liq_table_size>0) ? cos(mie_sample_angle(mie_liq_cdf_shared, mie_liq_ang, rng(), re_liq[ijk], mie_liq_table_size)): henyey(g,rng());
+                    }
+                    else if (scatter_rng < ((scat_asy[ijk].k_sca_aer+scat_asy[ijk].k_sca_liq+scat_asy[ijk].k_sca_ice)/k_sca_tot))
+                    {
+                        // ice clouds
+                        g = min(Float(1.) - Float_epsilon, scat_asy[ijk].asy_ice);
+                        cos_scat = (mie_ice_table_size>0) ? cos(mie_sample_angle(mie_ice_cdf_shared, mie_ice_ang, rng(), re_ice[ijk], mie_ice_table_size)): henyey(g,rng());
+                    }
+                    else
+                    {   
+                        // gases
+                        g = Float(0.);
+                        cos_scat = rayleigh(rng());
                     }
 
-                    // 0 (gas): rayleigh, 1 (cloud): mie if mie_table_size>0 else HG, 2 (aerosols) HG
-                    const Float cos_scat = scatter_type == 0 ? rayleigh(rng()) : // gases -> rayleigh,
-                                                           1 ? ( (mie_table_size > 0) //clouds: Mie or HG
-                                                                    ? cos( mie_sample_angle(mie_cdf_shared, mie_ang, rng(), r_eff[ijk], mie_table_size) )
-                                                                    :  henyey(g, rng()))
-                                                           : henyey(g, rng()); //aerosols
                     const Float sin_scat = max(Float(0.), sqrt(Float(1.) - cos_scat*cos_scat + Float_epsilon));
 
                     Vector<Float> t1{Float(0.), Float(0.), Float(0.)};
