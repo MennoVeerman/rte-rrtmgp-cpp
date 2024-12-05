@@ -416,13 +416,13 @@ void ray_tracer_kernel(
                     {
                         //liquid clouds
                         g = min(Float(1.) - Float_epsilon, scat_asy[ijk].asy_liq);
-                        cos_scat = (mie_liq_table_size>0) ? cos(mie_sample_angle(mie_liq_cdf_shared, mie_liq_ang, rng(), re_liq[ijk], mie_liq_table_size)): henyey(g,rng());
+                        cos_scat = (mie_liq_table_size>0) ? cos(mie_sample_angle(mie_liq_cdf_shared, mie_liq_ang, rng(), re_liq[ijk], mie_liq_table_size, Float(2.5), Float(1.), 18)): henyey(g,rng());
                     }
                     else if (scatter_rng < ((scat_asy[ijk].k_sca_aer+scat_asy[ijk].k_sca_liq+scat_asy[ijk].k_sca_ice)/k_sca_tot))
                     {
                         // ice clouds
                         g = min(Float(1.) - Float_epsilon, scat_asy[ijk].asy_ice);
-                        cos_scat = (mie_ice_table_size>0) ? cos(mie_sample_angle(mie_ice_cdf_shared, mie_ice_ang, rng(), re_ice[ijk], mie_ice_table_size)): henyey(g,rng());
+                        cos_scat = (mie_ice_table_size>0) ? cos(mie_sample_angle(mie_ice_cdf_shared, mie_ice_ang, rng(), re_ice[ijk], mie_ice_table_size, Float(10.), Float(2.5), 21)): henyey(g,rng());
                     }
                     else
                     {   

@@ -96,8 +96,8 @@ namespace
         if ( (icol < ncol) && (ilay < nlay) )
         {
             const int idx = icol + ilay*ncol;
-            taussag[idx] /= taussa[idx];
-            taussa[idx] /= tau[idx];
+            taussag[idx] /= max(taussa[idx], tmin);
+            taussa[idx] /= max(tau[idx], tmin);
         }
     }
     

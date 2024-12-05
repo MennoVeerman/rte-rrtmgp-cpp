@@ -550,23 +550,26 @@ Radiation_solver_shortwave::Radiation_solver_shortwave(
 }
 
 void Radiation_solver_shortwave::load_mie_tables(
-        const std::string& file_name_mie)
+        const std::string& file_name_mie_liq,
+        const std::string& file_name_mie_ice)
 {
-    Netcdf_file mie_nc(file_name_mie, Netcdf_mode::Read);
+    Netcdf_file mie_nc(file_name_mie_liq, Netcdf_mode::Read);
 
     const int n_bnd_sw = this->get_n_bnd_gpu();
-    const int n_re_liq  = mie_nc.get_dimension_size("r_eff_liq");
-    const int n_mie_liq = mie_nc.get_dimension_size("n_ang_liq");
-    Array<Float,2> mie_liq_cdf(mie_nc.get_variable<Float>("phase_liq_cdf", {n_bnd_sw, n_mie_liq}), {n_mie_liq, n_bnd_sw});
-    Array<Float,3> mie_liq_ang(mie_nc.get_variable<Float>("phase_liq_cdf_angle", {n_bnd_sw, n_re_liq, n_mie_liq}), {n_mie_liq, n_re_liq, n_bnd_sw});
-    
-    const int n_re_ice  = mie_nc.get_dimension_size("r_eff_ice");
-    const int n_mie_ice = mie_nc.get_dimension_size("n_ang_ice");
-    Array<Float,2> mie_ice_cdf(mie_nc.get_variable<Float>("phase_ice_cdf", {n_bnd_sw, n_mie_ice}), {n_mie_ice, n_bnd_sw});
-    Array<Float,3> mie_ice_ang(mie_nc.get_variable<Float>("phase_ice_cdf_angle", {n_bnd_sw, n_re_ice, n_mie_ice}), {n_mie_ice, n_re_ice, n_bnd_sw});
-
+    const int n_re_liq  = mie_nc.get_dimension_size("r_eff");
+    const int n_mie_liq = mie_nc.get_dimension_size("n_ang");
+    Array<Float,2> mie_liq_cdf(mie_nc.get_variable<Float>("phase_cdf", {n_bnd_sw, n_mie_liq}), {n_mie_liq, n_bnd_sw});
+    Array<Float,3> mie_liq_ang(mie_nc.get_variable<Float>("phase_cdf_angle", {n_bnd_sw, n_re_liq, n_mie_liq}), {n_mie_liq, n_re_liq, n_bnd_sw});
     this->mie_liq_cdfs = mie_liq_cdf;
     this->mie_liq_angs = mie_liq_ang;
+    
+    Netcdf_file mie_ice_nc(file_name_mie_ice, Netcdf_mode::Read);
+    
+    const int n_re_ice  = mie_ice_nc.get_dimension_size("r_eff");
+    const int n_mie_ice = mie_ice_nc.get_dimension_size("n_ang");
+    Array<Float,2> mie_ice_cdf(mie_ice_nc.get_variable<Float>("phase_cdf", {n_bnd_sw, n_mie_ice}), {n_mie_ice, n_bnd_sw});
+    Array<Float,3> mie_ice_ang(mie_ice_nc.get_variable<Float>("phase_cdf_angle", {n_bnd_sw, n_re_ice, n_mie_ice}), {n_mie_ice, n_re_ice, n_bnd_sw});
+
     this->mie_ice_cdfs = mie_ice_cdf;
     this->mie_ice_angs = mie_ice_ang;
 

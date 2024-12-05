@@ -636,7 +636,7 @@ void solve_radiation(int argc, char** argv)
         //load Mie LUT first
         if (switch_cloud_mie)
         {
-            rad_sw.load_mie_tables("mie_lut_broadband.nc");
+            rad_sw.load_mie_tables("mie_lut_broadband.nc", "mie_lut_ice.nc");
         }
 
 

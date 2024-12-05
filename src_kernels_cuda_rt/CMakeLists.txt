@@ -5,7 +5,7 @@ FILE(GLOB sourcefiles_rt
     "../src_kernels_cuda_rt/subset_kernels_launchers_rt.cu"
     "../src_kernels_cuda_rt/gpt_combine_kernels_launchers_rt.cu"
     "../src_kernels_cuda_rt/raytracer_kernels.cu"
-    "../src_kernels_cuda_rt/raytracer_kernels_bw.cu")
+    )#"../src_kernels_cuda_rt/raytracer_kernels_bw.cu")
 
 
 if(CMAKE_BUILD_TYPE STREQUAL "RELEASE")

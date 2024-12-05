@@ -94,7 +94,8 @@ class Radiation_solver_shortwave
                 const std::string& file_name_aerosol);
 
         void load_mie_tables(
-                const std::string& file_name_mie);
+                const std::string& file_name_mie_liq,
+                const std::string& file_name_mie_ice);
 
         #ifdef __CUDACC__
         void solve_gpu(

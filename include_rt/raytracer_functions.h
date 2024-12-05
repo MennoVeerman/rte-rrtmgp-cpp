@@ -87,12 +87,13 @@ namespace Raytracer_functions
     }
 
     __device__
-    inline Float mie_sample_angle(const Float* mie_cdf, const Float* mie_lut, const Float random_number, const Float r_eff, const int n_mie)
+    inline Float mie_sample_angle(const Float* mie_cdf, const Float* mie_lut, const Float random_number, const Float r_eff, const int n_mie, const Float r_min, const Float d_r, const int n_r)
     {
         // interpolation over effective radius. Currently, r_eff should range between 2.5 and 21.5 (similar to RRTMGP) OR
         // be exactly 100 micrometer for optical effects such as rainbows
-        const int r_idx = (r_eff == Float(100.)) ? 20 : min(max(int(r_eff-2.5), 0), 18);
-        const Float r_rest = fmod(r_eff-Float(2.5),Float(1.));
+        // const int r_idx = (r_eff == Float(100.)) ? 20 : min(max(int(r_eff-2.5), 0), 18);
+        const int r_idx = min(max(int((r_eff-r_min)/d_r), 0), n_r);
+        const Float r_rest = fmod(r_eff-Float(r_min),Float(d_r));
 
         int i = 0;
         while (random_number < mie_cdf[i])
@@ -102,39 +103,39 @@ namespace Raytracer_functions
 
         // sampled scattering angle
         Float ang;
-        if (r_idx < 20)
+        // if (r_idx < 20)
+        // {
+        if (i==0)
         {
-            if (i==0)
-            {
-                const Float ang_lwr = mie_lut[r_idx*n_mie]*(1-r_rest);
-                const Float ang_upr = mie_lut[(r_idx+1)*n_mie]*r_rest;
-                ang = ang_lwr + ang_upr;
-            }
-            else
-            {
-                const int midx_lwr = r_idx*n_mie;
-                const int midx_upr = (r_idx+1)*n_mie;
-                const Float dr = abs(mie_cdf[i] - mie_cdf[i-1]);
-
-                const Float ang_lwr = (abs(random_number - mie_cdf[i])*mie_lut[(i-1)+midx_lwr] + abs(mie_cdf[i-1]-random_number)*mie_lut[i+midx_lwr]) / dr;
-                const Float ang_upr = (abs(random_number - mie_cdf[i])*mie_lut[(i-1)+midx_upr] + abs(mie_cdf[i-1]-random_number)*mie_lut[i+midx_upr]) / dr;
-                ang = ang_lwr * (1-r_rest) + ang_upr * r_rest;
-            }
+            const Float ang_lwr = mie_lut[r_idx*n_mie]*(1-r_rest);
+            const Float ang_upr = mie_lut[(r_idx+1)*n_mie]*r_rest;
+            ang = ang_lwr + ang_upr;
         }
         else
         {
-            if (i==0)
-            {
-                ang = mie_lut[r_idx*n_mie];
-            }
-            else
-            {
-                const int midx = r_idx*n_mie;
-                const Float dr = abs(mie_cdf[i] - mie_cdf[i-1]);
+            const int midx_lwr = r_idx*n_mie;
+            const int midx_upr = (r_idx+1)*n_mie;
+            const Float d_cdf = abs(mie_cdf[i] - mie_cdf[i-1]);
 
-                ang = (abs(random_number - mie_cdf[i])*mie_lut[(i-1)+midx] + abs(mie_cdf[i-1]-random_number)*mie_lut[i+midx]) / dr;
-            }
+            const Float ang_lwr = (abs(random_number - mie_cdf[i])*mie_lut[(i-1)+midx_lwr] + abs(mie_cdf[i-1]-random_number)*mie_lut[i+midx_lwr]) / d_cdf;
+            const Float ang_upr = (abs(random_number - mie_cdf[i])*mie_lut[(i-1)+midx_upr] + abs(mie_cdf[i-1]-random_number)*mie_lut[i+midx_upr]) / d_cdf;
+            ang = ang_lwr * (1-r_rest) + ang_upr * r_rest;
         }
+        // }
+        // else
+        // {
+        //     if (i==0)
+        //     {
+        //         ang = mie_lut[r_idx*n_mie];
+        //     }
+        //     else
+        //     {
+        //         const int midx = r_idx*n_mie;
+        //         const Float dr = abs(mie_cdf[i] - mie_cdf[i-1]);
+
+        //         ang = (abs(random_number - mie_cdf[i])*mie_lut[(i-1)+midx] + abs(mie_cdf[i-1]-random_number)*mie_lut[i+midx]) / dr;
+        //     }
+        // }
         return ang;
     }
 
