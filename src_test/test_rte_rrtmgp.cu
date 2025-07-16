@@ -30,7 +30,7 @@
 #include "Aerosol_optics.h"
 #include "types.h"
 #include "mem_pool_gpu.h"
-
+#include "tilt_utils.h"
 
 void read_and_set_vmr(
         const std::string& gas_name, const int n_col_x, const int n_col_y, const int n_lay,
@@ -211,7 +211,8 @@ void solve_radiation(int argc, char** argv)
         {"output-bnd-fluxes", { false, "Enable output of band fluxes."             }},
         {"timings"          , { false, "Repeat computation 10x for run times."     }},
         {"delta-cloud"      , { true,  "delta-scaling of cloud optical properties"   }},
-        {"delta-aerosol"    , { false, "delta-scaling of aerosol optical properties" }}};
+        {"delta-aerosol"    , { false, "delta-scaling of aerosol optical properties" }},
+        {"tica"              , { false, "attenuate path when doing an overhead 1D calculation of tilted input"   }}};
 
     if (parse_command_line_options(command_line_options, argc, argv))
         return;
@@ -226,6 +227,36 @@ void solve_radiation(int argc, char** argv)
     const bool switch_timings           = command_line_options.at("timings"          ).first;
     const bool switch_delta_cloud       = command_line_options.at("delta-cloud"      ).first;
     const bool switch_delta_aerosol     = command_line_options.at("delta-aerosol"    ).first;
+    const bool switch_tica              = command_line_options.at("tica"     ).first;
+
+
+    bool switch_liq_cloud_optics;
+    bool switch_ice_cloud_optics;
+    if (switch_cloud_optics)
+    {
+        switch_liq_cloud_optics = true;
+        switch_ice_cloud_optics = true;
+    }
+    else
+    {
+        switch_liq_cloud_optics = false;
+        switch_ice_cloud_optics = false;
+    }
+
+    if (switch_tica)
+        Status::print_message("Using TICA creates upto 4 times more vertical levels that should fit in memory");
+
+    if (switch_longwave && switch_tica)
+    {
+        std::string error = "Combi of longwave radiation and tilted columns is not tested";
+        throw std::runtime_error(error);
+    }
+
+    if (switch_tica && switch_output_bnd_fluxes)
+    {
+        std::string error = "Output band fluxes not supported for tilted columns";
+        throw std::runtime_error(error);
+    }
 
     // Print the options to the screen.
     print_command_line_options(command_line_options);
@@ -321,6 +352,139 @@ void solve_radiation(int argc, char** argv)
     }
 
 
+    bool do_tilting = true;
+
+    if (switch_tica)
+    {
+        Array<Float,1> mu0({n_col});
+        Array<Float,1> azi({n_col});
+
+        Float tica_sza;
+        Float tica_azi;
+
+        mu0 = input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x});
+        azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
+
+        // define arrays
+        Array<ijk,1> center_path;
+        Array<Float,1> center_zh_tilt;
+        Array<Float,1> zh;
+        const int n_z_in = input_nc.get_dimension_size("z");
+        const int n_zh_in = input_nc.get_dimension_size("zh");
+
+        Array<Float,1> xh;
+        Array<Float,1> yh;
+        Array<Float,1> z;
+
+        xh.set_dims({n_col_x+1});
+        xh = std::move(input_nc.get_variable<Float>("xh", {n_col_x+1}));
+        yh.set_dims({n_col_y+1});
+        yh = std::move(input_nc.get_variable<Float>("yh", {n_col_y+1}));
+
+        zh.set_dims({n_zh_in});
+        zh = std::move(input_nc.get_variable<Float>("zh", {n_zh_in}));
+        z.set_dims({n_z_in});
+        z = std::move(input_nc.get_variable<Float>("z", {n_z_in}));
+
+        tica_sza = acos(mu0.v()[0]);
+        tica_azi = azi.v()[0];
+
+        tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
+        int n_z_tilt_center = center_zh_tilt.v().size() - 1;
+
+        Status::print_message("tilted path created");
+
+        if (n_z_tilt_center > 4 * n_lay)
+            do_tilting = false;
+
+        if (do_tilting)
+        {
+            for (int icol = 1; icol <= n_col; ++icol) {
+                mu0({icol}) = 1.0;
+                azi({icol}) = 0.0;
+            }
+
+            std::vector<std::string> gas_names = {
+                    "h2o", "co2", "o3", "n2o", "co", "ch4", "o2", "n2", "ccl4", "cfc11",
+                    "cfc12", "cfc22", "hfc143a", "hfc125", "hfc23", "hfc32", "hfc134a",
+                    "cf4", "no2"
+            };
+            std::vector<std::string> aerosol_names = {
+                    "aermr01", "aermr02", "aermr03", "aermr04", "aermr05", "aermr06", "aermr07",
+                    "aermr08", "aermr09", "aermr10", "aermr11"
+            };
+
+            for (const auto &aerosol_name: aerosol_names) {
+                if (!aerosol_concs.exists(aerosol_name)) {
+                    continue;
+                }
+                const Array<Float, 2> &gas = aerosol_concs.get_vmr(aerosol_name);
+                if (gas.size() > 1) {
+                    if (gas.get_dims()[0] == 1) {
+                        aerosol_concs.set_vmr(aerosol_name,
+                                              aerosol_concs.get_vmr(aerosol_name).subset({{{1, n_col}, {1, n_lay}}}));
+                    }
+                }
+            }
+
+            Array<Float, 2> t_lay_out = t_lay;
+            Array<Float, 2> t_lev_out = t_lev;
+            Array<Float, 2> p_lay_out = p_lay;
+            Array<Float, 2> p_lev_out = p_lev;
+            Gas_concs gas_concs_out = gas_concs;
+            Aerosol_concs aerosol_concs_out = aerosol_concs;
+            Array<Float, 2> rh_out = rh;
+
+            Array<Float,2> lwp_out;
+            lwp_out.set_dims({n_col, n_z_in});
+            Array<Float,2> rel_out;
+            rel_out.set_dims({n_col, n_z_in});
+            Array<Float,2> iwp_out;
+            iwp_out.set_dims({n_col, n_z_in});
+            Array<Float,2> dei_out;
+            dei_out.set_dims({n_col, n_z_in});
+
+            Status::print_message("start tilting");
+
+            tica_tilt(
+                    tica_sza, tica_azi,
+                    n_col_x, n_col_y, n_col,
+                    n_lay, n_lev, n_z_in, n_zh_in,
+                    xh, yh, zh, z,
+                    p_lay, t_lay, p_lev, t_lev,
+                    lwp, iwp, rel, dei, rh,
+                    gas_concs, aerosol_concs,
+                    p_lay_out, t_lay_out, p_lev_out, t_lev_out,
+                    lwp_out, iwp_out, rel_out, dei_out, rh_out,
+                    gas_concs_out, aerosol_concs_out,
+                    gas_names, aerosol_names,
+                    switch_cloud_optics, switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics
+            );
+
+            Status::print_message("tilting okay, copying output");
+
+            lwp_out.expand_dims({n_col, n_lay});
+            rel_out.expand_dims({n_col, n_lay});
+            iwp_out.expand_dims({n_col, n_lay});
+            dei_out.expand_dims({n_col, n_lay});
+
+            lwp = lwp_out;
+            rel = rel_out;
+            iwp = iwp_out;
+            dei = dei_out;
+            rh = rh_out;
+
+            p_lay = p_lay_out;
+            p_lev = p_lev_out;
+            t_lay = t_lay_out;
+            t_lev = t_lev_out;
+
+            gas_concs = gas_concs_out;
+            aerosol_concs = aerosol_concs_out;
+
+            Status::print_message("copying output complete");
+        }
+    }
 
     ////// CREATE THE OUTPUT FILE //////
     // Create the general dimensions and arrays.
@@ -578,6 +742,20 @@ void solve_radiation(int argc, char** argv)
                 tsi_scaling({icol}) = Float(1.);
         }
 
+        Array<Float,1> tica_scaling({n_col});
+        if (switch_tica && do_tilting)
+        {
+            for (int icol=1; icol<=n_col; ++icol)
+            {
+                const Float tica_sza = acos(mu0({icol}));
+                tica_scaling({icol}) = std::cos(tica_sza);
+            }
+            for (int icol = 1; icol <= n_col; ++icol)
+            {
+                mu0({icol}) = 1.0;
+            }
+        }
+
         // Create output arrays.
         Array_gpu<Float,3> sw_tau;
         Array_gpu<Float,3> ssa;
@@ -632,6 +810,7 @@ void solve_radiation(int argc, char** argv)
             Array_gpu<Float,2> sfc_alb_dir_gpu(sfc_alb_dir);
             Array_gpu<Float,2> sfc_alb_dif_gpu(sfc_alb_dif);
             Array_gpu<Float,1> tsi_scaling_gpu(tsi_scaling);
+            Array_gpu<Float,1> tica_scaling_gpu(tica_scaling);
             Array_gpu<Float,1> mu0_gpu(mu0);
             Array_gpu<Float,2> lwp_gpu(lwp);
             Array_gpu<Float,2> iwp_gpu(iwp);
@@ -649,6 +828,12 @@ void solve_radiation(int argc, char** argv)
 
             cudaEventRecord(start, 0);
 
+            bool sw_do_tica;
+            if (switch_tica && do_tilting)
+                sw_do_tica = true;
+            else
+                sw_do_tica = false;
+
             rad_sw.solve_gpu(
                     switch_fluxes,
                     switch_cloud_optics,
@@ -657,12 +842,14 @@ void solve_radiation(int argc, char** argv)
                     switch_output_bnd_fluxes,
                     switch_delta_cloud,
                     switch_delta_aerosol,
+                    sw_do_tica,
                     gas_concs_gpu,
                     p_lay_gpu, p_lev_gpu,
                     t_lay_gpu, t_lev_gpu,
                     col_dry_gpu,
                     sfc_alb_dir_gpu, sfc_alb_dif_gpu,
                     tsi_scaling_gpu, mu0_gpu,
+                    tica_scaling_gpu,
                     lwp_gpu, iwp_gpu,
                     rel_gpu, dei_gpu,
                     rh_gpu,
@@ -673,6 +860,36 @@ void solve_radiation(int argc, char** argv)
                     sw_flux_dn_dir, sw_flux_net,
                     sw_bnd_flux_up, sw_bnd_flux_dn,
                     sw_bnd_flux_dn_dir, sw_bnd_flux_net);
+
+//            if (switch_tica)
+//            {
+//                const int ncoltiltsize = n_col * center_zh_tilt.size() * sizeof(Float);
+//                const int ncollaysize = n_col * n_lay * sizeof(Float);
+//
+//                // sw_flux_dn
+//                Array<Float,2> sw_flux_dn_cpu;
+//                cuda_safe_call(cudaMemcpy(sw_flux_dn_cpu.ptr(), sw_flux_dn.ptr(),  ncoltiltsize, cudaMemcpyDeviceToHost));
+//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
+//                cuda_safe_call(cudaMemcpy(sw_flux_dn.ptr(), sw_flux_dn_cpu.ptr(),  ncollaysize, cudaMemcpyHostToDevice));
+//
+//                // sw_flux_dn_dir
+//                Array<Float,2> sw_flux_dn_dir_cpu;
+//                cuda_safe_call(cudaMemcpy(sw_flux_dn_dir_cpu.ptr(), sw_flux_dn_dir.ptr(),  ncoltiltsize, cudaMemcpyDeviceToHost));
+//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
+//                cuda_safe_call(cudaMemcpy(sw_flux_dn_dir.ptr(), sw_flux_dn_dir_cpu.ptr(),  ncollaysize, cudaMemcpyHostToDevice));
+//
+//                // sw_flux_up
+//                Array<Float,2> sw_flux_up_cpu;
+//                cuda_safe_call(cudaMemcpy(sw_flux_up_cpu.ptr(), sw_flux_up.ptr(),  ncoltiltsize, cudaMemcpyDeviceToHost));
+//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
+//                cuda_safe_call(cudaMemcpy(sw_flux_up.ptr(), sw_flux_up_cpu.ptr(),  ncollaysize, cudaMemcpyHostToDevice));
+//
+//                // sw_flux_net
+//                Array<Float,2> sw_flux_net_cpu;
+//                cuda_safe_call(cudaMemcpy(sw_flux_net_cpu.ptr(), sw_flux_net.ptr(),  ncoltiltsize, cudaMemcpyDeviceToHost));
+//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
+//                cuda_safe_call(cudaMemcpy(sw_flux_net.ptr(), sw_flux_net_cpu.ptr(),  ncollaysize, cudaMemcpyHostToDevice));
+//            }
 
             cudaEventRecord(stop, 0);
             cudaEventSynchronize(stop);

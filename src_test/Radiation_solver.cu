@@ -40,6 +40,33 @@
 namespace
 {
     __global__
+    void scale_tau_kernel(Float* tau, const int ncol, const int nlay, const int ngpt, Float scale_factor) {
+
+        const int igpt = blockIdx.x*blockDim.x + threadIdx.x;
+        const int icol = blockIdx.y*blockDim.y + threadIdx.y;
+        const int ilay = blockIdx.z*blockDim.z + threadIdx.z;
+
+        if ( (icol < ncol) && (ilay < nlay) && (igpt < ngpt))
+        {
+            const int idx = icol + ilay*ncol + igpt*ncol*nlay;
+            tau[idx] = tau[idx] * scale_factor;
+        }
+    }
+
+    void scale_tau(Float* tau, const int ncol, const int nlay, const int ngpt, Float scale_factor) {
+        const int block_col = 16;
+        const int block_lay = 16;
+        const int block_gpt = 16;
+        const int grid_col  = ncol/block_col + (ncol%block_col > 0);
+        const int grid_lay  = nlay/block_lay + (nlay%block_lay > 0);
+        const int grid_gpt = ngpt/block_gpt + (ngpt%block_gpt > 0);
+
+        dim3 grid_gpu(grid_col, grid_lay, grid_gpt);
+        dim3 block_gpu(block_col, block_lay, block_gpt);
+        scale_tau_kernel<<<grid_gpu, block_gpu>>>(tau, ncol, nlay, ngpt, scale_factor);
+    }
+
+    __global__
     void scaling_to_subset_kernel(
             const int ncol, const int ngpt, Float* __restrict__ toa_src, const Float* __restrict__ tsi_scaling)
     {
@@ -688,12 +715,14 @@ void Radiation_solver_shortwave::solve_gpu(
         const bool switch_output_bnd_fluxes,
         const bool switch_delta_cloud,
         const bool switch_delta_aerosol,
+        const bool switch_attenuate_tica,
         const Gas_concs_gpu& gas_concs,
         const Array_gpu<Float,2>& p_lay, const Array_gpu<Float,2>& p_lev,
         const Array_gpu<Float,2>& t_lay, const Array_gpu<Float,2>& t_lev,
         const Array_gpu<Float,2>& col_dry,
         const Array_gpu<Float,2>& sfc_alb_dir, const Array_gpu<Float,2>& sfc_alb_dif,
         const Array_gpu<Float,1>& tsi_scaling, const Array_gpu<Float,1>& mu0,
+        const Array_gpu<Float,1>& tica_scaling,
         const Array_gpu<Float,2>& lwp, const Array_gpu<Float,2>& iwp,
         const Array_gpu<Float,2>& rel, const Array_gpu<Float,2>& dei,
         const Array_gpu<Float,2>& rh,
@@ -739,6 +768,8 @@ void Radiation_solver_shortwave::solve_gpu(
             aerosol_optical_props_residual = std::make_unique<Optical_props_2str_gpu>(n_col_block_residual, n_lay, *aerosol_optics_gpu);
     }
 
+    Float attenuate_scale_factor = 1/tica_scaling({1});
+
     // Lambda function for solving optical properties subset.
     auto call_kernels = [&, n_col, n_lay, n_lev, n_gpt, n_bnd](
             const int col_s_in, const int col_e_in,
@@ -770,6 +801,18 @@ void Radiation_solver_shortwave::solve_gpu(
                   col_dry_subset);
         auto tsi_scaling_subset = tsi_scaling.subset({{ {col_s_in, col_e_in} }});
         scaling_to_subset(n_col_in, n_gpt, toa_src_subset, tsi_scaling_subset);
+
+        if (switch_attenuate_tica)
+        {
+            auto tica_scaling_subset = tica_scaling.subset({{ {col_s_in, col_e_in} }});
+            scaling_to_subset(n_col_in, n_gpt, toa_src_subset, tica_scaling_subset);
+        }
+
+        if (switch_attenuate_tica)
+        {
+            scale_tau(dynamic_cast<Optical_props_2str_gpu&>(*optical_props_subset_in).get_tau().ptr(), n_col_in, n_lay, n_gpt, attenuate_scale_factor);
+        }
+
         if (switch_cloud_optics)
         {
             Array<int,2> cld_mask_liq({n_col_in, n_lay});
@@ -784,6 +827,12 @@ void Radiation_solver_shortwave::solve_gpu(
 
             if (switch_delta_cloud)
                 cloud_optical_props_subset_in->delta_scale();
+
+            if (switch_attenuate_tica)
+            {
+                scale_tau(dynamic_cast<Optical_props_2str_gpu&>(*cloud_optical_props_subset_in).get_tau().ptr(), n_col_in, n_lay, n_gpt, attenuate_scale_factor);
+            }
+
 
             // Add the cloud optical props to the gas optical properties.
             add_to(
@@ -802,6 +851,11 @@ void Radiation_solver_shortwave::solve_gpu(
 
             if (switch_delta_aerosol)
                 aerosol_optical_props_subset_in->delta_scale();
+
+            if (switch_attenuate_tica)
+            {
+                scale_tau(dynamic_cast<Optical_props_2str_gpu&>(*aerosol_optical_props_subset_in).get_tau().ptr(), n_col_in, n_lay, n_gpt, attenuate_scale_factor);
+            }
 
             // Add the aerosol optical props to the gas optical properties.
             add_to(

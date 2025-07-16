@@ -122,3 +122,21 @@ void tica_tilt(const Float sza, const Float azi,
     Gas_concs& gas_concs_out, Aerosol_concs aerosol_concs_out,
     std::vector<std::string> gas_names, std::vector<std::string> aerosol_names,
     bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics);
+
+void tica_tilt_uncompressed(const Float sza, const Float azi,
+                            const int n_col_x, const int n_col_y, const int n_col,
+                            const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in ,
+                            Array<Float,1> xh, Array<Float,1> yh, Array<Float,1> zh, Array<Float,1> z,
+                            Array<Float,2> p_lay, Array<Float,2> t_lay, Array<Float,2> p_lev, Array<Float,2> t_lev,
+                            Array<Float,2> lwp, Array<Float,2> iwp, Array<Float,2> rel, Array<Float,2> dei,
+                            Array<Float,2> rh,
+                            Gas_concs gas_concs, Aerosol_concs aerosol_concs,
+                            Array<Float,2>& p_lay_out, Array<Float,2>& t_lay_out, Array<Float,2>& p_lev_out, Array<Float,2>& t_lev_out,
+                            Array<Float,2>& lwp_out, Array<Float,2>& iwp_out, Array<Float,2>& rel_out, Array<Float,2>& dei_out, Array<Float,2>& rh_out,
+                            Gas_concs& gas_concs_out, Aerosol_concs aerosol_concs_out,
+                            std::vector<std::string> gas_names, std::vector<std::string> aerosol_names,
+                            bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics);
+
+void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
+                      const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
+                      const std::vector<ijk>& tilted_path, Array<Float,2>& flux);
