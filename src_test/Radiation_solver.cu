@@ -40,26 +40,27 @@
 namespace
 {
     __global__
-    void scale_tau_kernel(Float* tau, const int ncol, const int nlay, const int ngpt, Float scale_factor) {
+    void scale_tau_kernel(Float* __restrict__ tau, const int ncol, const int nlay, const int ngpt, Float scale_factor) {
 
-        const int igpt = blockIdx.x*blockDim.x + threadIdx.x;
-        const int icol = blockIdx.y*blockDim.y + threadIdx.y;
-        const int ilay = blockIdx.z*blockDim.z + threadIdx.z;
+        const int icol = blockIdx.x*blockDim.x + threadIdx.x;
+        const int ilay = blockIdx.y*blockDim.y + threadIdx.y;
+        const int igpt = blockIdx.z*blockDim.z + threadIdx.z;
 
-        if ( (icol < ncol) && (ilay < nlay) && (igpt < ngpt))
+        if ( (icol < ncol) && (ilay < nlay) && (igpt < ngpt) )
         {
-            const int idx = icol + ilay*ncol + igpt*ncol*nlay;
-            tau[idx] = tau[idx] * scale_factor;
+            const int idx = icol + ilay*ncol + igpt*nlay*ncol;
+            tau[idx] *= scale_factor;
         }
     }
 
     void scale_tau(Float* tau, const int ncol, const int nlay, const int ngpt, Float scale_factor) {
-        const int block_col = 16;
+        const int block_gpt = 1;
         const int block_lay = 16;
-        const int block_gpt = 16;
-        const int grid_col  = ncol/block_col + (ncol%block_col > 0);
+        const int block_col = 16;
+
+        const int grid_gpt  = ngpt/block_gpt + (ngpt%block_gpt > 0);
         const int grid_lay  = nlay/block_lay + (nlay%block_lay > 0);
-        const int grid_gpt = ngpt/block_gpt + (ngpt%block_gpt > 0);
+        const int grid_col  = ncol/block_col + (ncol%block_col > 0);
 
         dim3 grid_gpu(grid_col, grid_lay, grid_gpt);
         dim3 block_gpu(block_col, block_lay, block_gpt);
@@ -830,7 +831,7 @@ void Radiation_solver_shortwave::solve_gpu(
 
             if (switch_attenuate_tica)
             {
-                scale_tau(dynamic_cast<Optical_props_2str_gpu&>(*cloud_optical_props_subset_in).get_tau().ptr(), n_col_in, n_lay, n_gpt, attenuate_scale_factor);
+                scale_tau(dynamic_cast<Optical_props_2str_gpu&>(*cloud_optical_props_subset_in).get_tau().ptr(), n_col_in, n_lay, n_bnd, attenuate_scale_factor);
             }
 
 
@@ -854,7 +855,7 @@ void Radiation_solver_shortwave::solve_gpu(
 
             if (switch_attenuate_tica)
             {
-                scale_tau(dynamic_cast<Optical_props_2str_gpu&>(*aerosol_optical_props_subset_in).get_tau().ptr(), n_col_in, n_lay, n_gpt, attenuate_scale_factor);
+                scale_tau(dynamic_cast<Optical_props_2str_gpu&>(*aerosol_optical_props_subset_in).get_tau().ptr(), n_col_in, n_lay, n_bnd, attenuate_scale_factor);
             }
 
             // Add the aerosol optical props to the gas optical properties.
