@@ -815,9 +815,10 @@ void tica_tilt(
     Gas_concs gas_concs, Aerosol_concs aerosol_concs,
     Array<Float,2>& p_lay_out, Array<Float,2>& t_lay_out, Array<Float,2>& p_lev_out, Array<Float,2>& t_lev_out, 
     Array<Float,2>& lwp_out, Array<Float,2>& iwp_out, Array<Float,2>& rel_out, Array<Float,2>& dei_out, Array<Float,2>& rh_out, 
-    Gas_concs& gas_concs_out, Aerosol_concs aerosol_concs_out,
+    Gas_concs& gas_concs_out, Aerosol_concs& aerosol_concs_out,
     std::vector<std::string> gas_names, std::vector<std::string> aerosol_names,
-    bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics
+    bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
+    int rnd_seed
 )
 {
        // if t lev all 0, interpolate from t lay
@@ -873,8 +874,9 @@ void tica_tilt(
            std::vector<Float> by_col_n_z_tilt(n_col);
        
            std::mt19937_64 rng;
-           uint64_t timeSeed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-           std::seed_seq ss{uint32_t(timeSeed & 0xffffffff), uint32_t(timeSeed>>32)};
+           // uint64_t timeSeed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+           // std::seed_seq ss{uint32_t(timeSeed & 0xffffffff), uint32_t(timeSeed>>32)};
+           std::seed_seq ss{rnd_seed};
            rng.seed(ss);
            std::uniform_real_distribution<double> unif(0.001, 0.999);
            for (int i = 0; i < n_col; i++)
@@ -1163,189 +1165,6 @@ void tica_tilt(
            switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics
        );
 }
-
-
-// MT: simplified TICA function. This function skips the compression as it complicates the
-// computation of heating rates and is not required for two-stream computations. Note that one tilted path is used as
-// all output columns should be of equal size.
-void tica_tilt_uncompressed(
-        const Float sza, const Float azi,
-        const int n_col_x, const int n_col_y, const int n_col,
-        const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in,
-        Array<Float,1> xh, Array<Float,1> yh, Array<Float,1> zh, Array<Float,1> z,
-        Array<Float,2> p_lay, Array<Float,2> t_lay, Array<Float,2> p_lev, Array<Float,2> t_lev,
-        Array<Float,2> lwp, Array<Float,2> iwp, Array<Float,2> rel, Array<Float,2> dei,
-        Array<Float,2> rh,
-        Gas_concs gas_concs, Aerosol_concs aerosol_concs,
-        Array<Float,2>& p_lay_out, Array<Float,2>& t_lay_out, Array<Float,2>& p_lev_out, Array<Float,2>& t_lev_out,
-        Array<Float,2>& lwp_out, Array<Float,2>& iwp_out, Array<Float,2>& rel_out, Array<Float,2>& dei_out, Array<Float,2>& rh_out,
-        Gas_concs& gas_concs_out, Aerosol_concs aerosol_concs_out,
-        std::vector<std::string> gas_names, std::vector<std::string> aerosol_names,
-        bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics
-)
-{
-    // t_lev is only all 0 in input for standalone solver, so no need to interpolate here
-
-    ////// SETUP FOR CENTER START POINT TILTING //////
-    Array<ijk,1> center_path;
-    Array<Float,1> center_zh_tilt;
-    tilted_path(xh.v(),yh.v(),zh.v(),z.v(),sza,azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
-
-    int n_zh_tilt_center = center_zh_tilt.v().size();
-    int n_z_tilt_center = n_zh_tilt_center - 1;
-
-    // set dims for output arrays to size of tilted path
-    lwp_out.set_dims({n_col, n_z_tilt_center});
-    rel_out.set_dims({n_col, n_z_tilt_center});
-    iwp_out.set_dims({n_col, n_z_tilt_center});
-    dei_out.set_dims({n_col, n_z_tilt_center});
-
-    // tilt gasses and aerosols
-    tilt_fields(n_z_in, n_zh_in, n_col_x, n_col_y,
-                n_z_tilt_center, n_zh_tilt_center, n_col,
-                zh, z,
-                center_zh_tilt, center_path,
-                &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out, &rh_out,
-                gas_concs_out, gas_names, aerosol_concs_out, aerosol_names, switch_aerosol_optics
-    );
-
-    // no compression
-    // still check if number of tilted levels is not extremely large (defined as 4 times the number of input layers)
-    if (n_z_tilt_center > 4 * n_z_in) {
-        throw std::runtime_error("number of tilted layers > 4 times numer of input layers - SZA too high.");
-    }
-
-
-    if (switch_cloud_optics)
-    {
-        // no random starting point, as all tilted columns must be the same number of layers/levels
-
-        // vector to store results
-        const int total_iterations = n_col_x * n_col_y;
-        std::vector<ColumnResult> col_results(total_iterations);
-
-        // Normalization of lwp and iwp and reshaping
-        Array<Float,2> lwp_norm_reshaped;
-        lwp_norm_reshaped.set_dims({n_z_in, n_col});
-        Array<Float,2> rel_reshaped;
-        rel_reshaped.set_dims({n_z_in, n_col});
-        Array<Float,2> iwp_norm_reshaped;
-        iwp_norm_reshaped.set_dims({n_z_in, n_col});
-        Array<Float,2> dei_reshaped;
-        dei_reshaped.set_dims({n_z_in, n_col});
-
-        for (int icol = 1; icol <= n_col; ++icol)
-        {
-            for (int ilay = 1; ilay <= n_zh_in; ++ilay)
-            {
-                Float dz = zh({ilay + 1}) - zh({ilay});
-                if (switch_liq_cloud_optics)
-                {
-                    (lwp_norm_reshaped)({ilay, icol}) = (lwp)({icol, ilay})/dz;
-                    (rel_reshaped)({ilay, icol}) = (rel)({icol, ilay});
-                }
-                if (switch_ice_cloud_optics)
-                {
-                    (iwp_norm_reshaped)({ilay, icol}) = (iwp)({icol, ilay})/dz;
-                    (dei_reshaped)({ilay, icol}) = (dei)({icol, ilay});
-                }
-            }
-        }
-
-        // tilt lwp and rel
-        if (switch_liq_cloud_optics)
-        {
-            const std::vector<Float> var_lwp = lwp_norm_reshaped.v();
-            const std::vector<Float> var_rel = rel_reshaped.v();
-
-            for (int idx_y = 0; idx_y < n_col_y; idx_y++)
-            {
-                for (int idx_x = 0; idx_x < n_col_x; idx_x++)
-                {
-                    int i = idx_x + idx_y * n_col_x;
-
-                    // use center tilted path as all tilted paths should be of the same length
-                    const std::vector<ijk>& tilted_path_v = center_path.v();
-
-                    std::vector<Float> var_lwp_out(n_z_tilt_center);
-                    std::vector<Float> var_rel_out(n_z_tilt_center);
-
-                    for (int ilay=0; ilay < n_z_tilt_center; ++ilay)
-                    {
-                        Float dz = center_zh_tilt.v()[ilay + 1] - center_zh_tilt.v()[ilay];
-                        const ijk offset = tilted_path_v[ilay];
-                        const int i_col_new  = ((idx_y+offset.j)%n_col_y) * n_col_x + ((idx_x + offset.i)%n_col_x);
-                        const int idx_in = offset.k + i_col_new*n_z_in;
-                        var_lwp_out[ilay] = var_lwp[idx_in] * dz;
-                        var_rel_out[ilay] = var_rel[idx_in];
-                    }
-
-                    // no compression
-
-                    // store results
-                    col_results[i].lwp   = std::move(var_lwp_out);
-                    col_results[i].rel   = std::move(var_rel_out);
-                }
-            }
-        }
-
-        // tilt iwp and dei
-        if (switch_ice_cloud_optics){
-            const std::vector<Float> var_iwp = iwp_norm_reshaped.v();
-            const std::vector<Float> var_dei = dei_reshaped.v();
-
-            for (int idx_y = 0; idx_y < n_col_y; idx_y++)
-            {
-                for (int idx_x = 0; idx_x < n_col_x; idx_x++)
-                {
-                    int i = idx_x + idx_y * n_col_x;
-
-                    const std::vector<ijk>& tilted_path_v = center_path.v();
-
-                    std::vector<Float> var_iwp_out(n_z_tilt_center);
-                    std::vector<Float> var_dei_out(n_z_tilt_center);
-
-                    for (int ilay=0; ilay < n_z_tilt_center; ++ilay)
-                    {
-                        Float dz = center_zh_tilt.v()[ilay + 1] - center_zh_tilt.v()[ilay];
-                        const ijk offset = tilted_path_v[ilay];
-                        const int i_col_new  = ((idx_y+offset.j)%n_col_y) * n_col_x + ((idx_x + offset.i)%n_col_x);
-                        const int idx_in = offset.k + i_col_new*n_z_in;
-                        var_iwp_out[ilay] = var_iwp[idx_in] * dz;
-                        var_dei_out[ilay] = var_dei[idx_in];
-                    }
-
-                    // no compression
-
-                    // store results
-                    col_results[i].iwp   = std::move(var_iwp_out);
-                    col_results[i].dei   = std::move(var_dei_out);
-                }
-            }
-        }
-
-        // copy per column results to output lwp, iwp, rel, and dei fields
-        post_process_output(col_results, n_col_x, n_col_y, n_z_in, n_zh_in,
-                            &lwp_out, &iwp_out, &rel_out, &dei_out,
-                            switch_liq_cloud_optics, switch_ice_cloud_optics);
-
-    }
-
-    // correction for layers between TOD and TOA
-    restore_bkg_profile_bundle(n_col_x, n_col_y,
-                               n_lay, n_lev, n_lay, n_lev,
-                               n_z_in, n_zh_in, n_z_in, n_zh_in,
-                               &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out,
-                               &lwp_out, &iwp_out, &rel_out, &dei_out, &rh_out,
-                               gas_concs_out, aerosol_concs_out,
-                               &p_lay, &t_lay, &p_lev, &t_lev,
-                               &lwp, &iwp, &rel, &dei, &rh,
-                               gas_concs, aerosol_concs,
-                               gas_names, aerosol_names,
-                               switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics
-    );
-}
-
 
 void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
                       const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,

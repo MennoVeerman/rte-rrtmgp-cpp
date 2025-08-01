@@ -278,12 +278,29 @@ void solve_radiation(int argc, char** argv)
     Array<Float,2> p_lev(input_nc.get_variable<Float>("p_lev", {n_lev, n_col_y, n_col_x}), {n_col, n_lev});
     Array<Float,2> t_lev(input_nc.get_variable<Float>("t_lev", {n_lev, n_col_y, n_col_x}), {n_col, n_lev});
 
+    if (input_nc.variable_exists("col_dry") && switch_tica)
+    {
+        std::string error = "col_dry is not supported in tica mode";
+        throw std::runtime_error(error);
+
+    }
+
     // Fetch the col_dry in case present.
     Array<Float,2> col_dry;
     if (input_nc.variable_exists("col_dry"))
     {
         col_dry.set_dims({n_col, n_lay});
         col_dry = std::move(input_nc.get_variable<Float>("col_dry", {n_lay, n_col_y, n_col_x}));
+    }
+
+    // obtain random number seed for tilted colums
+    int rnd_seed;
+    if (switch_tica)
+    {
+        if (input_nc.variable_exists("rnd_seed"))
+            rnd_seed = input_nc.get_variable<int>("rnd_seed");
+        else
+            rnd_seed = 0;
     }
 
     // Create container for the gas concentrations and read gases.
@@ -351,16 +368,14 @@ void solve_radiation(int argc, char** argv)
         read_and_set_aer("aermr11", n_col_x, n_col_y, n_lay, input_nc, aerosol_concs);
     }
 
-
     bool do_tilting = true;
+    Float tica_sza;
+    Float tica_azi;
 
     if (switch_tica)
     {
         Array<Float,1> mu0({n_col});
         Array<Float,1> azi({n_col});
-
-        Float tica_sza;
-        Float tica_azi;
 
         mu0 = input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x});
         azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
@@ -391,8 +406,6 @@ void solve_radiation(int argc, char** argv)
 
         tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
         int n_z_tilt_center = center_zh_tilt.v().size() - 1;
-
-        Status::print_message("tilted path created");
 
         if (n_z_tilt_center > 4 * n_lay)
             do_tilting = false;
@@ -444,8 +457,6 @@ void solve_radiation(int argc, char** argv)
             Array<Float,2> dei_out;
             dei_out.set_dims({n_col, n_z_in});
 
-            Status::print_message("start tilting");
-
             tica_tilt(
                     tica_sza, tica_azi,
                     n_col_x, n_col_y, n_col,
@@ -458,10 +469,9 @@ void solve_radiation(int argc, char** argv)
                     lwp_out, iwp_out, rel_out, dei_out, rh_out,
                     gas_concs_out, aerosol_concs_out,
                     gas_names, aerosol_names,
-                    switch_cloud_optics, switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics
+                    switch_cloud_optics, switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics,
+                    rnd_seed
             );
-
-            Status::print_message("tilting okay, copying output");
 
             lwp_out.expand_dims({n_col, n_lay});
             rel_out.expand_dims({n_col, n_lay});
@@ -481,8 +491,6 @@ void solve_radiation(int argc, char** argv)
 
             gas_concs = gas_concs_out;
             aerosol_concs = aerosol_concs_out;
-
-            Status::print_message("copying output complete");
         }
     }
 
@@ -747,7 +755,6 @@ void solve_radiation(int argc, char** argv)
         {
             for (int icol=1; icol<=n_col; ++icol)
             {
-                const Float tica_sza = acos(mu0({icol}));
                 tica_scaling({icol}) = std::cos(tica_sza);
             }
             for (int icol = 1; icol <= n_col; ++icol)

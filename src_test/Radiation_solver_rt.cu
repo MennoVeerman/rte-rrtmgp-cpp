@@ -611,6 +611,7 @@ void Radiation_solver_shortwave::solve_gpu(
         Array_gpu<Float,2>& col_dry,
         const Array_gpu<Float,2>& sfc_alb_dir, const Array_gpu<Float,2>& sfc_alb_dif,
         const Array_gpu<Float,1>& tsi_scaling,
+        const Array_gpu<Float,1>& tica_scaling,
         const Array_gpu<Float,1>& mu0, const Array_gpu<Float,1>& azi,
         const Array_gpu<Float,2>& lwp, const Array_gpu<Float,2>& iwp,
         const Array_gpu<Float,2>& rel, const Array_gpu<Float,2>& dei,
@@ -681,7 +682,7 @@ void Radiation_solver_shortwave::solve_gpu(
 
     const Array<int, 2>& band_limits_gpt(this->kdist_gpu->get_band_lims_gpoint());
     int previous_band = 0;
-    Float attenuate_scale_factor = 1/tsi_scaling({1});
+    Float attenuate_scale_factor = 1/tica_scaling({1});
 
     for (int igpt=1; igpt<=n_gpt; ++igpt)
     {
@@ -735,7 +736,10 @@ void Radiation_solver_shortwave::solve_gpu(
             gas_optics_subset(col_s, n_col_residual);
         }
 
-        toa_src.fill(toa_src_temp({1}) * tsi_scaling({1}));
+        if (switch_attenuate_tica)
+             toa_src.fill(toa_src_temp({1}) * tsi_scaling({1}) * tica_scaling({1}));
+        else
+            toa_src.fill(toa_src_temp({1}) * tsi_scaling({1}));
 
         if (switch_attenuate_tica)
         {

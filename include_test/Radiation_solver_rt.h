@@ -120,6 +120,7 @@ class Radiation_solver_shortwave
                 Array_gpu<Float,2>& col_dry,
                 const Array_gpu<Float,2>& sfc_alb_dir, const Array_gpu<Float,2>& sfc_alb_dif,
                 const Array_gpu<Float,1>& tsi_scaling,
+                const Array_gpu<Float,1>& tica_scaling,
                 const Array_gpu<Float,1>& mu0, const Array_gpu<Float,1>& azi,
                 const Array_gpu<Float,2>& lwp, const Array_gpu<Float,2>& iwp,
                 const Array_gpu<Float,2>& rel, const Array_gpu<Float,2>& dei,

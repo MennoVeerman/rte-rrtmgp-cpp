@@ -119,9 +119,10 @@ void tica_tilt(const Float sza, const Float azi,
     Gas_concs gas_concs, Aerosol_concs aerosol_concs,
     Array<Float,2>& p_lay_out, Array<Float,2>& t_lay_out, Array<Float,2>& p_lev_out, Array<Float,2>& t_lev_out, 
     Array<Float,2>& lwp_out, Array<Float,2>& iwp_out, Array<Float,2>& rel_out, Array<Float,2>& dei_out, Array<Float,2>& rh_out, 
-    Gas_concs& gas_concs_out, Aerosol_concs aerosol_concs_out,
+    Gas_concs& gas_concs_out, Aerosol_concs& aerosol_concs_out,
     std::vector<std::string> gas_names, std::vector<std::string> aerosol_names,
-    bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics);
+    bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
+    int rnd_seed);
 
 void tica_tilt_uncompressed(const Float sza, const Float azi,
                             const int n_col_x, const int n_col_y, const int n_col,
