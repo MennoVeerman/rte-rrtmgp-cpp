@@ -372,6 +372,10 @@ void solve_radiation(int argc, char** argv)
     Float tica_sza;
     Float tica_azi;
 
+    Array<ijk,1> center_path;
+    Array<Float,1> center_zh_tilt;
+    Array<Float,1> zh;
+
     if (switch_tica)
     {
         Array<Float,1> mu0({n_col});
@@ -381,9 +385,7 @@ void solve_radiation(int argc, char** argv)
         azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
 
         // define arrays
-        Array<ijk,1> center_path;
-        Array<Float,1> center_zh_tilt;
-        Array<Float,1> zh;
+
         const int n_z_in = input_nc.get_dimension_size("z");
         const int n_zh_in = input_nc.get_dimension_size("zh");
 
@@ -868,36 +870,6 @@ void solve_radiation(int argc, char** argv)
                     sw_bnd_flux_up, sw_bnd_flux_dn,
                     sw_bnd_flux_dn_dir, sw_bnd_flux_net);
 
-//            if (switch_tica)
-//            {
-//                const int ncoltiltsize = n_col * center_zh_tilt.size() * sizeof(Float);
-//                const int ncollaysize = n_col * n_lay * sizeof(Float);
-//
-//                // sw_flux_dn
-//                Array<Float,2> sw_flux_dn_cpu;
-//                cuda_safe_call(cudaMemcpy(sw_flux_dn_cpu.ptr(), sw_flux_dn.ptr(),  ncoltiltsize, cudaMemcpyDeviceToHost));
-//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
-//                cuda_safe_call(cudaMemcpy(sw_flux_dn.ptr(), sw_flux_dn_cpu.ptr(),  ncollaysize, cudaMemcpyHostToDevice));
-//
-//                // sw_flux_dn_dir
-//                Array<Float,2> sw_flux_dn_dir_cpu;
-//                cuda_safe_call(cudaMemcpy(sw_flux_dn_dir_cpu.ptr(), sw_flux_dn_dir.ptr(),  ncoltiltsize, cudaMemcpyDeviceToHost));
-//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
-//                cuda_safe_call(cudaMemcpy(sw_flux_dn_dir.ptr(), sw_flux_dn_dir_cpu.ptr(),  ncollaysize, cudaMemcpyHostToDevice));
-//
-//                // sw_flux_up
-//                Array<Float,2> sw_flux_up_cpu;
-//                cuda_safe_call(cudaMemcpy(sw_flux_up_cpu.ptr(), sw_flux_up.ptr(),  ncoltiltsize, cudaMemcpyDeviceToHost));
-//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
-//                cuda_safe_call(cudaMemcpy(sw_flux_up.ptr(), sw_flux_up_cpu.ptr(),  ncollaysize, cudaMemcpyHostToDevice));
-//
-//                // sw_flux_net
-//                Array<Float,2> sw_flux_net_cpu;
-//                cuda_safe_call(cudaMemcpy(sw_flux_net_cpu.ptr(), sw_flux_net.ptr(),  ncoltiltsize, cudaMemcpyDeviceToHost));
-//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
-//                cuda_safe_call(cudaMemcpy(sw_flux_net.ptr(), sw_flux_net_cpu.ptr(),  ncollaysize, cudaMemcpyHostToDevice));
-//            }
-
             cudaEventRecord(stop, 0);
             cudaEventSynchronize(stop);
             float duration = 0.f;
@@ -938,6 +910,21 @@ void solve_radiation(int argc, char** argv)
         Array<Float,3> sw_bnd_flux_dn_cpu(sw_bnd_flux_dn);
         Array<Float,3> sw_bnd_flux_dn_dir_cpu(sw_bnd_flux_dn_dir);
         Array<Float,3> sw_bnd_flux_net_cpu(sw_bnd_flux_net);
+
+        if (switch_tica && do_tilting)
+        {
+            // sw_flux_dn
+            translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
+
+            // sw_flux_dn_dir
+            translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
+
+            // sw_flux_up
+            translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
+
+            // sw_flux_net
+            translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
+        }
 
         output_nc.add_dimension("gpt_sw", n_gpt_sw);
         output_nc.add_dimension("band_sw", n_bnd_sw);

@@ -1172,25 +1172,41 @@ void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
 {
     std::vector<Float> flux_tmp(n_lev_in*n_x*n_y, Float(0.));
 
-    int k = 0;
-    for (int ilev=0; ilev<n_lev_in; ++ilev)
+    const int idx_top = zh.v().size() -1;   // -1 as zh is one longer than z (at which tilted path is defined)
+    for (int ilev=0; ilev<idx_top; ++ilev)
     {
-        while (tilted_path[k].k == ilev)
+        std::cout<<ilev<<std::endl;
+        for (int k=0; k<zh_tilt.v().size(); ++k)
         {
             if (zh_tilt.v()[k] == zh.v()[ilev])
             {
                 const ijk offset = tilted_path[k];
                 for (int iy = 0; iy < n_y; ++iy)
-                    for (int ix = 0; ix < n_x; ++ix) {
-                        const int idx_out = ix + iy * n_y + ilev * n_y * n_x;
-                        const int idx_in = (ix - offset.i) % n_x + (iy - offset.j) % n_y * n_x + k * n_y * n_x;
+                    for (int ix = 0; ix < n_x; ++ix)
+                    {
+                        const int idx_out = ix + iy * n_x + ilev * n_y * n_x;
+                        const int idx_in = (ix - offset.i) % n_x + (iy - offset.j) % n_y * n_x + ilev * n_y * n_x;
                         flux_tmp[idx_out] = flux.ptr()[idx_in];
                     }
-                k += 1;
             }
         }
     }
-    
-    flux.set_dims({n_x*n_y, n_lev_in});
+
+    std::cout<<"domain done"<<std::endl;
+
+    const int idx_top_tilt = zh_tilt.v().size()-2;       // -2: -1 for index starting at zero and -1 as zh is one longer than z
+    const ijk offset_tod = tilted_path[idx_top_tilt];
+    for (int ilev=idx_top; ilev < n_lev_in; ++ilev)
+    {
+        std::cout<<ilev<<std::endl;
+        for (int iy = 0; iy < n_y; ++iy)
+            for (int ix = 0; ix < n_x; ++ix)
+            {
+                const int idx_out = ix + iy * n_x + ilev * n_y * n_x;
+                const int idx_in = (ix - offset_tod.i) % n_x + (iy - offset_tod.j) % n_y * n_x + ilev * n_y * n_x;
+                flux_tmp[idx_out] = flux.ptr()[idx_in];
+            }
+    }
+
     flux = std::move(flux_tmp);
 }
