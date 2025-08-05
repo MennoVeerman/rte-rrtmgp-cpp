@@ -226,7 +226,7 @@ void restore_bkg_profile_bundle(const int n_col_x, const int n_col_y,
     Array<Float,2>* p_lay, Array<Float,2>* t_lay, Array<Float,2>* p_lev, Array<Float,2>* t_lev, 
     Array<Float,2>* lwp, Array<Float,2>* iwp, Array<Float,2>* rel, Array<Float,2>* dei, Array<Float,2>* rh, 
     Gas_concs& gas_concs, Aerosol_concs& aerosol_concs, 
-    std::vector<std::string> gas_names, std::vector<std::string> aerosol_names,
+    const std::vector<std::string>& gas_names, const std::vector<std::string>& aerosol_names,
     bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics
 )
 {
@@ -359,36 +359,15 @@ void post_process_output(const std::vector<ColumnResult>& col_results,
 void compress_columns_weighted_avg(const int n_x, const int n_y,  
                       const int n_out, 
                       const int n_tilt,
-                      const int compress_lay_start_idx,
+                      const Array<ijk,1>& path,
                       std::vector<Float>& var, std::vector<Float>& var_weighting)
 {
     std::vector<Float> var_tmp(n_out * n_x * n_y);
+    const std::vector<ijk>& tilted_path_v = path.v();
 
     #pragma omp parallel for
-    for (int ilay = 0; ilay < compress_lay_start_idx; ++ilay)
+    for (int ilay = 0; ilay < n_out; ++ ilay)
     {
-        for (int iy = 0; iy < n_y; ++iy)
-        {
-            for (int ix = 0; ix < n_x; ++ix)
-            {
-                const int out_idx = ix + iy * n_x + ilay * n_x * n_y;
-                var_tmp[out_idx] = var[out_idx];
-            }
-        }
-    }
-
-    #pragma omp parallel for
-    for (int ilay = compress_lay_start_idx; ilay < n_out; ++ilay)
-    {
-        const int in_offset = ilay - compress_lay_start_idx;
-        const int i_lay_in = (compress_lay_start_idx + 2 * in_offset);
-        int num_inputs;
-        if (ilay < (n_out - 1)) {
-            num_inputs = 2;
-        } else {
-            num_inputs = ((i_lay_in + 1) == (n_tilt - 1)) ? 2 : 3;
-        }
-
         for (int iy = 0; iy < n_y; ++iy)
         {
             for (int ix = 0; ix < n_x; ++ix)
@@ -396,27 +375,26 @@ void compress_columns_weighted_avg(const int n_x, const int n_y,
                 const int out_idx = ix + iy * n_x + ilay * n_x * n_y;
                 Float t_sum = 0.0;
                 Float w_sum = 0.0;
-                for (int k = 0; k < num_inputs; ++k)
+                Float avg = 0.0;
+                int num_inputs = 0;
+
+                for (int ilay_tilt = 0; ilay_tilt < n_tilt; ++ilay_tilt)
                 {
-                    int in_idx = ix + iy * n_x + (i_lay_in + k) * n_x * n_y;
-                    t_sum += var[in_idx] * var_weighting[in_idx];
-                    w_sum += var_weighting[in_idx];
+                    const ijk offset = tilted_path_v[ilay_tilt];
+                    if (offset.k == ilay)
+                    {
+                        int in_idx = ix + iy * n_x + ilay_tilt * n_x * n_y;
+                        t_sum += var[in_idx] * var_weighting[in_idx];
+                        w_sum += var_weighting[in_idx];
+                        avg += var[in_idx];
+                        num_inputs += 1;
+                    }
                 }
 
                 if (w_sum > 1e-6)
-                {
                     var_tmp[out_idx] = t_sum / w_sum;
-                } 
-                else 
-                {
-                    Float avg = 0.0;
-                    for (int k = 0; k < num_inputs; ++k)
-                    {
-                        int in_idx = ix + iy * n_x + (i_lay_in + k) * n_x * n_y;
-                        avg += var[in_idx];
-                    }
+                else
                     var_tmp[out_idx] = avg / num_inputs;
-                }
             }
         }
     }
@@ -425,82 +403,47 @@ void compress_columns_weighted_avg(const int n_x, const int n_y,
 
 void compress_columns_p_or_t(const int n_x, const int n_y, 
                       const int n_out_lay,  const int n_tilt,
-                      const int compress_lay_start_idx,
+                      const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
+                      const Array<Float,1>& z,
                       std::vector<Float>& var_lev, std::vector<Float>& var_lay)
 {
     std::vector<Float> var_tmp_lay(n_out_lay * n_x * n_y);
     std::vector<Float> var_tmp_lev((n_out_lay + 1) * n_x * n_y);
 
+    // temperature and pressure at original levels can be taken directly from the same height in the tilted column
     #pragma omp parallel for
-    for (int ilay = 0; ilay < compress_lay_start_idx; ++ilay)
+    for (int ilev = 0; ilev < (n_out_lay + 1); ++ilev)
+    {
+        for (int iy = 0; iy < n_y; ++iy)
+        {
+            for (int ix = 0; ix < n_x; ++ix)
+            {
+                for (int ilev_tilt = 0; ilev_tilt < (n_tilt + 1); ++ilev_tilt)
+                {
+                    if (zh.v()[ilev] == zh_tilt.v()[ilev_tilt])
+                    {
+                        const int out_idx = ix + iy * n_x + ilev * n_x * n_y;
+                        const int in_idx = ix + iy * n_x + ilev_tilt * n_x * n_y;
+                        var_tmp_lev[out_idx] = var_lev[in_idx];
+                    }
+                }
+            }
+        }
+    }
+
+    // height of layer center differs between the original column and the tilted column, so we interpolate between the levels
+    // weighted interpolation based on z, as in the interpolation function
+    #pragma omp parallel for
+    for (int ilay = 0; ilay < n_out_lay; ++ilay)
     {
         for (int iy = 0; iy < n_y; ++iy)
         {
             for (int ix = 0; ix < n_x; ++ix)
             {
                 const int out_idx = ix + iy * n_x + ilay * n_x * n_y;
-                var_tmp_lay[out_idx] = var_lev[out_idx];
-                var_tmp_lev[out_idx] = var_lev[out_idx];
-            }
-        }
-    }
-
-    int ilay = compress_lay_start_idx;
-    for (int iy = 0; iy < n_y; ++iy)
-    {
-        for (int ix = 0; ix < n_x; ++ix)
-        {
-            const int out_idx = ix + iy * n_x + ilay * n_x * n_y;
-            var_tmp_lev[out_idx] = var_lev[out_idx];
-        }
-    }
-
-    #pragma omp parallel for
-    for (int ilev = (compress_lay_start_idx + 1); ilev < (n_out_lay + 1); ++ilev)
-    {
-        int i_lev_in;
-        if (ilev == n_out_lay)
-        {
-            i_lev_in = n_tilt;
-        }
-        else
-        {
-            i_lev_in = (compress_lay_start_idx + 2) + 2 * (ilev - (compress_lay_start_idx + 1));
-        }
-
-        for (int iy = 0; iy < n_y; ++iy)
-        {
-            for (int ix = 0; ix < n_x; ++ix)
-            {
-                const int out_idx = ix + iy * n_x + ilev * n_x * n_y;
-                const int in_idx = ix + iy * n_x + i_lev_in * n_x * n_y;
-                var_tmp_lev[out_idx] = var_lev[in_idx];
-            }
-        }
-    }
-
-    #pragma omp parallel for
-    for (int ilay = compress_lay_start_idx; ilay < n_out_lay; ++ilay)
-    {
-        const int in_offset = ilay - compress_lay_start_idx;
-        int i_lev_to_lay_in;
-        if (ilay == (n_out_lay - 1))
-        {
-            i_lev_to_lay_in = n_tilt - 1; // in some cases this is a slight approximation.
-        }
-        else 
-        {
-            i_lev_to_lay_in = (compress_lay_start_idx + 2 * in_offset - 1);
-        }
-        
-        for (int iy = 0; iy < n_y; ++iy)
-        {
-            for (int ix = 0; ix < n_x; ++ix)
-            {
-                const int out_idx = ix + iy * n_x + ilay * n_x * n_y;
-                const int in_idx_lev_to_lay = ix + iy * n_x + i_lev_to_lay_in * n_x * n_y;
-                
-                var_tmp_lay[out_idx] = var_lev[in_idx_lev_to_lay];
+                const float dz =  zh.v()[ilay+1] - zh.v()[ilay];
+                var_tmp_lay[out_idx] = (var_tmp_lev[out_idx] * (z.v()[ilay] - zh.v()[ilay]) / dz
+                                        + var_tmp_lev[out_idx + 1] * (zh.v()[ilay + 1] - z.v()[ilay]) / dz);
             }
         }
     }
@@ -510,12 +453,12 @@ void compress_columns_p_or_t(const int n_x, const int n_y,
 
 void tilt_fields(const int n_z_in, const int n_zh_in, const int n_col_x, const int n_col_y,
     const int n_z_tilt, const int n_zh_tilt, const int n_col,
-    const Array<Float,1> zh, const Array<Float,1> z,
-    const Array<Float,1> zh_tilt, const Array<ijk,1> path,
+    const Array<Float,1>& zh, const Array<Float,1>& z,
+    const Array<Float,1>& zh_tilt, const Array<ijk,1>& path,
     Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy, 
     Array<Float,2>* rh_copy, 
-    Gas_concs& gas_concs_copy, const std::vector<std::string> gas_names,
-    Aerosol_concs& aerosol_concs_copy, const std::vector<std::string> aerosol_names, const bool switch_aerosol_optics
+    Gas_concs& gas_concs_copy, const std::vector<std::string>& gas_names,
+    Aerosol_concs& aerosol_concs_copy, const std::vector<std::string>& aerosol_names, const bool switch_aerosol_optics
 ) {
     for (const auto& gas_name : gas_names) {
         if (!gas_concs_copy.exists(gas_name)) {
@@ -589,12 +532,15 @@ void tilt_fields(const int n_z_in, const int n_zh_in, const int n_col_x, const i
     }
 }
 
-void compress_fields(const int compress_lay_start_idx, const int n_col_x, const int n_col_y,
+void compress_fields(const int n_col_x, const int n_col_y,
     const int n_z_in, const int n_zh_in,  const int n_z_tilt,
+    const Array<ijk,1>& center_path,
+    const Array<Float,1>& center_zh_tilt, const Array<Float,1>& zh,
+    const Array<Float,1>& z,
     Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy, 
     Array<Float,2>* rh_copy, 
-    Gas_concs& gas_concs_copy, std::vector<std::string> gas_names,
-    Aerosol_concs& aerosol_concs_copy, std::vector<std::string> aerosol_names, const bool switch_aerosol_optics)
+    Gas_concs& gas_concs_copy, std::vector<std::string>& gas_names,
+    Aerosol_concs& aerosol_concs_copy, std::vector<std::string>& aerosol_names, const bool switch_aerosol_optics)
 {
     const int n_col = n_col_x*n_col_y;
 
@@ -607,7 +553,7 @@ void compress_fields(const int compress_lay_start_idx, const int n_col_x, const 
             Array<Float,2> gas_tmp(gas);
             compress_columns_weighted_avg(n_col_x, n_col_y,
                                             n_z_in, n_z_tilt,
-                                            compress_lay_start_idx, 
+                                            center_path,
                                             gas_tmp.v(), 
                                             p_lay_copy->v());
             gas_tmp.expand_dims({n_col, n_z_in});
@@ -620,7 +566,7 @@ void compress_fields(const int compress_lay_start_idx, const int n_col_x, const 
         std::vector<Float> ones(p_lay_copy->v().size(), 1.0);
         compress_columns_weighted_avg(n_col_x, n_col_y,
             n_z_in, n_z_tilt,
-            compress_lay_start_idx, 
+            center_path,
             rh_copy->v(), 
             ones);
         rh_copy->expand_dims({n_col, n_z_in});
@@ -634,7 +580,7 @@ void compress_fields(const int compress_lay_start_idx, const int n_col_x, const 
                 Array<Float,2> gas_tmp(gas);
                 compress_columns_weighted_avg(n_col_x, n_col_y,
                                                 n_z_in, n_z_tilt,
-                                                compress_lay_start_idx, 
+                                                center_path,
                                                 gas_tmp.v(), 
                                                 p_lay_copy->v());
                 gas_tmp.expand_dims({n_col, n_z_in});
@@ -643,15 +589,20 @@ void compress_fields(const int compress_lay_start_idx, const int n_col_x, const 
         }
     }
     compress_columns_p_or_t(n_col_x, n_col_y, n_z_in, n_z_tilt,
-                            compress_lay_start_idx, 
+                            center_zh_tilt, zh,
+                            z,
                             p_lev_copy->v(), p_lay_copy->v());
     p_lay_copy->expand_dims({n_col, n_z_in});
     p_lev_copy->expand_dims({n_col, n_zh_in});
     compress_columns_p_or_t(n_col_x, n_col_y, n_z_in, n_z_tilt,
-                            compress_lay_start_idx, 
+                            center_zh_tilt, zh,
+                            z,
                             t_lev_copy->v(), t_lay_copy->v());
     t_lay_copy->expand_dims({n_col, n_z_in});
     t_lev_copy->expand_dims({n_col, n_zh_in});
+
+    p_lay_copy->dump("p_lay_dump");
+    p_lev_copy->dump("p_lev_dump");
 }
 
 void create_tilted_columns(const int n_x, const int n_y, const int n_lay_in, const int n_lev_in,
@@ -806,364 +757,282 @@ void create_tilted_columns_levlay(const int n_x, const int n_y, const int n_lay_
 
 
 void tica_tilt(
-    const Float sza, const Float azi,
-    const int n_col_x, const int n_col_y, const int n_col,
-    const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in ,
-    Array<Float,1> xh, Array<Float,1> yh, Array<Float,1> zh, Array<Float,1> z,
-    Array<Float,2> p_lay, Array<Float,2> t_lay, Array<Float,2> p_lev, Array<Float,2> t_lev, 
-    Array<Float,2> lwp, Array<Float,2> iwp, Array<Float,2> rel, Array<Float,2> dei, Array<Float,2> rh, 
-    Gas_concs gas_concs, Aerosol_concs aerosol_concs,
-    Array<Float,2>& p_lay_out, Array<Float,2>& t_lay_out, Array<Float,2>& p_lev_out, Array<Float,2>& t_lev_out, 
-    Array<Float,2>& lwp_out, Array<Float,2>& iwp_out, Array<Float,2>& rel_out, Array<Float,2>& dei_out, Array<Float,2>& rh_out, 
-    Gas_concs& gas_concs_out, Aerosol_concs& aerosol_concs_out,
-    std::vector<std::string> gas_names, std::vector<std::string> aerosol_names,
-    bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
-    int rnd_seed
+        const Float sza, const Float azi,
+        const int n_col_x, const int n_col_y, const int n_col,
+        const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in ,
+        Array<Float,1> xh, Array<Float,1> yh, Array<Float,1> zh, Array<Float,1> z,
+        Array<Float,2> p_lay, Array<Float,2> t_lay, Array<Float,2> p_lev, Array<Float,2> t_lev,
+        Array<Float,2> lwp, Array<Float,2> iwp, Array<Float,2> rel, Array<Float,2> dei, Array<Float,2> rh,
+        Gas_concs gas_concs, Aerosol_concs aerosol_concs,
+        Array<Float,2>& p_lay_out, Array<Float,2>& t_lay_out, Array<Float,2>& p_lev_out, Array<Float,2>& t_lev_out,
+        Array<Float,2>& lwp_out, Array<Float,2>& iwp_out, Array<Float,2>& rel_out, Array<Float,2>& dei_out, Array<Float,2>& rh_out,
+        Gas_concs& gas_concs_out, Aerosol_concs& aerosol_concs_out,
+        std::vector<std::string>& gas_names, std::vector<std::string>& aerosol_names,
+        bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
+        int rnd_seed
 )
 {
-       // if t lev all 0, interpolate from t lay
-       if (*std::max_element(t_lev_out.v().begin(), t_lev_out.v().end()) <= 0) {
-       for (int i = 1; i <= n_col; ++i) {
-           for (int j = 2; j <= n_lay; ++j) {
-               t_lev_out({i, j}) = (t_lay_out({i, j}) + t_lay_out({i, j - 1})) / 2.0;
-           }
-           t_lev_out({i, n_lev}) = 2 * t_lay_out({i, n_lay}) - t_lev_out({i,n_lay});
-           t_lev_out({i, 1}) = 2 * t_lay_out({i, 1}) - t_lev_out({i,2});
-           }
-       }
-       // copy interpolated values into t_lev too
-       t_lev = t_lev_out;
+    // if t lev all 0, interpolate from t lay
+    if (*std::max_element(t_lev_out.v().begin(), t_lev_out.v().end()) <= 0) {
+        for (int i = 1; i <= n_col; ++i) {
+            for (int j = 2; j <= n_lay; ++j) {
+                t_lev_out({i, j}) = (t_lay_out({i, j}) + t_lay_out({i, j - 1})) / 2.0;
+            }
+            t_lev_out({i, n_lev}) = 2 * t_lay_out({i, n_lay}) - t_lev_out({i,n_lay});
+            t_lev_out({i, 1}) = 2 * t_lay_out({i, 1}) - t_lev_out({i,2});
+        }
+    }
+    // copy interpolated values into t_lev too
+    t_lev = t_lev_out;
 
-       ////// SETUP FOR CENTER START POINT TILTING //////
-       Array<ijk,1> center_path;
-       Array<Float,1> center_zh_tilt;
-       tilted_path(xh.v(),yh.v(),zh.v(),z.v(),sza,azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
-       
-       int n_zh_tilt_center = center_zh_tilt.v().size();
-       int n_z_tilt_center = n_zh_tilt_center - 1;
-   
-       tilt_fields(n_z_in, n_zh_in, n_col_x, n_col_y,
-           n_z_tilt_center, n_zh_tilt_center, n_col,
-           zh, z,
-           center_zh_tilt, center_path,
-           &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out, &rh_out,
-           gas_concs_out, gas_names, aerosol_concs_out, aerosol_names, switch_aerosol_optics
-       );
-       
-       int idx_hold = 2*(n_z_tilt_center - n_z_in);
-       if ((n_z_tilt_center - idx_hold) % 2 != 0) {
-           idx_hold--;
-       }
-   
-       int compress_lay_start_idx_center = (n_z_tilt_center - idx_hold);
-       if (compress_lay_start_idx_center < 0) {
-           throw std::runtime_error("compress_lay_start_idx is negative - SZA too high.");
-       }
-       compress_fields(compress_lay_start_idx_center, n_col_x, n_col_y,
-                   n_z_in, n_zh_in, n_z_tilt_center,
-                   &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out, &rh_out,
-                   gas_concs_out, gas_names, aerosol_concs_out, aerosol_names, switch_aerosol_optics);
-       
-       ////// SETUP FOR RANDOM START POINT TILTING //////    
-       if (switch_cloud_optics)
-       {
-           std::vector<std::pair<Float, Float>> x_y_start_arr(n_col);
-           std::vector<Array<ijk,1>> by_col_paths(n_col);
-           std::vector<Array<Float,1>> by_col_zh_tilt(n_col);
-           std::vector<Float> by_col_n_zh_tilt(n_col);
-           std::vector<Float> by_col_n_z_tilt(n_col);
-       
-           std::mt19937_64 rng;
-           // uint64_t timeSeed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-           // std::seed_seq ss{uint32_t(timeSeed & 0xffffffff), uint32_t(timeSeed>>32)};
-           std::seed_seq ss{rnd_seed};
-           rng.seed(ss);
-           std::uniform_real_distribution<double> unif(0.001, 0.999);
-           for (int i = 0; i < n_col; i++)
-           {
-               Float x_point = unif(rng);
-               Float y_point = unif(rng);
-               x_y_start_arr[i] = std::make_pair(x_point, y_point);
-           }
-       
-           Status::print_message("###### Starting Tilting ######");
-           auto time_start = std::chrono::high_resolution_clock::now();
-           #pragma omp parallel for
-           for (int i = 0; i < n_col; i++) {
-               Float x_start = x_y_start_arr[i].first;
-               Float y_start = x_y_start_arr[i].second;
-               Array<ijk,1> path;
-               Array<Float,1> zh_tilt;
-               
-               tilted_path(xh.v(), yh.v(), zh.v(), z.v(), sza, azi, x_start, y_start, path.v(), zh_tilt.v());
-               int n_zh_tilt = zh_tilt.v().size();
-               int n_z_tilt = n_zh_tilt - 1;
+    ////// SETUP FOR CENTER START POINT TILTING //////
+    Array<ijk,1> center_path;
+    Array<Float,1> center_zh_tilt;
+    tilted_path(xh.v(),yh.v(),zh.v(),z.v(),sza,azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
 
-               path.set_dims({n_z_tilt}); 
-               zh_tilt.set_dims({n_zh_tilt}); 
-       
-               by_col_paths[i] = path;
-               by_col_zh_tilt[i] = zh_tilt;
-               by_col_n_zh_tilt[i] = n_zh_tilt;
-               by_col_n_z_tilt[i] = n_zh_tilt - 1;
-           }
-           auto time_end = std::chrono::high_resolution_clock::now();
-           auto duration = std::chrono::duration<double, std::milli>(time_end-time_start).count();
-       
-           Status::print_message("Duration tilting columns: " + std::to_string(duration) + " (ms)");
-           Status::print_message("###### Finish Tilting ######");
-       
-           Status::print_message("###### Check Sizes ######");
-           std::vector<Float> by_col_compress_start(n_col);
-           int max_n_z_tilt = 0;
-           for (int i = 0; i < n_col; i++) {
-               const Float n_zh_tilt = by_col_n_zh_tilt[i];
-               const Float n_z_tilt = by_col_n_z_tilt[i];
-               if (n_z_tilt > max_n_z_tilt) {
-                   max_n_z_tilt = n_z_tilt;
-               }
-               int idx_hold = 2*(n_z_tilt - n_z_in);
-       
-               int n_lay_compress = (n_z_tilt - idx_hold) + (idx_hold)/2;
-               int n_lev_compress = n_lay_compress + 1;
-               int compress_lay_start_idx = (n_z_tilt - idx_hold);
-               if (compress_lay_start_idx < 0) {
-                   throw std::runtime_error("compress_lay_start_idx is negative - SZA too high.");
-               }
-               by_col_compress_start[i] = compress_lay_start_idx;
-           }
-   
-           const int total_iterations = n_col_x * n_col_y;
-           std::vector<ColumnResult> col_results(total_iterations);
-       
-           // Do Normalization and Reshaping OUTSIDE OF LOOP
-           Array<Float,2> lwp_norm_reshaped;
-           lwp_norm_reshaped.set_dims({n_z_in, n_col});
-           Array<Float,2> rel_reshaped;
-           rel_reshaped.set_dims({n_z_in, n_col});
-           Array<Float,2> iwp_norm_reshaped;
-           iwp_norm_reshaped.set_dims({n_z_in, n_col});
-           Array<Float,2> dei_reshaped;
-           dei_reshaped.set_dims({n_z_in, n_col});
-   
-           for (int icol = 1; icol <= n_col; ++icol)    
-           {
-               for (int ilay = 1; ilay <= n_zh_in; ++ilay)    
-               {
-                   Float dz = zh({ilay + 1}) - zh({ilay});
-                   if (switch_liq_cloud_optics)
-                   {
-                       (lwp_norm_reshaped)({ilay, icol}) = (lwp)({icol, ilay})/dz;
-                       (rel_reshaped)({ilay, icol}) = (rel)({icol, ilay});
-                   }
-                   if (switch_ice_cloud_optics)
-                   {
-                       (iwp_norm_reshaped)({ilay, icol}) = (iwp)({icol, ilay})/dz;
-                       (dei_reshaped)({ilay, icol}) = (dei)({icol, ilay});
-                   }
-               }
-           }
-           
-           if (switch_liq_cloud_optics){
-               Array<Float,1> lwp_compress;
-               lwp_compress.set_dims({n_z_in});
-               Array<Float,1> rel_compress;
-               rel_compress.set_dims({n_z_in});
-               const std::vector<Float> var_lwp = lwp_norm_reshaped.v();
-               const std::vector<Float> var_rel = rel_reshaped.v();
-   
-               Status::print_message("###### Start Loop ######");
-               auto time_start_loop = std::chrono::high_resolution_clock::now();
-               for (int idx_y = 0; idx_y < n_col_y; idx_y++)
-               {
-                   for (int idx_x = 0; idx_x < n_col_x; idx_x++)
-                   {
-                       int i = idx_x + idx_y * n_col_x;
-                       const Array<ijk,1> tilted_path = by_col_paths[i];
-                       const std::vector<ijk>& tilted_path_v = tilted_path.v();
-                       const Array<Float,1> zh_tilt = by_col_zh_tilt[i];
-                       const int n_z_tilt = by_col_n_z_tilt[i];
-                       const int compress_lay_start_idx = by_col_compress_start[i];
-   
-                       std::vector<Float> var_lwp_tmp(n_z_tilt);
-                       std::vector<Float> var_rel_tmp(n_z_tilt);
-                       std::vector<Float> var_lwp_out(n_z_in);
-                       std::vector<Float> var_rel_out(n_z_in);
-                       
-                       for (int ilay=0; ilay < n_z_tilt; ++ilay)
-                       {
-                           Float dz = zh_tilt({ilay + 1}) - zh_tilt({ilay});
-                           const ijk offset = tilted_path_v[ilay];
-                           const int i_col_new  = ((idx_y+offset.j)%n_col_y) * n_col_x + ((idx_x + offset.i)%n_col_x);
-                           const int idx_in = offset.k + i_col_new*n_z_in;
-                           var_lwp_tmp[ilay] = var_lwp[idx_in] * dz;
-                           var_rel_tmp[ilay] = var_rel[idx_in];
-                       }  
-                       
-                       for (int ilay = 0; ilay < compress_lay_start_idx; ++ilay)
-                       {
-                           var_lwp_out[ilay] = var_lwp_tmp[ilay];
-                           var_rel_out[ilay] = var_rel_tmp[ilay];
-                       }
-               
-                       for (int ilay = compress_lay_start_idx; ilay < n_z_in; ++ilay)
-                       {
-                           const int in_offset = ilay - compress_lay_start_idx;
-                           const int i_lay_in = compress_lay_start_idx + 2 * in_offset;
-                           int num_inputs;
-                           if (ilay < (n_z_in - 1)) {
-                               num_inputs = 2;
-                           } 
-                           else {
-                               num_inputs = ((i_lay_in + 1) == (n_z_tilt - 1)) ? 2 : 3;
-                           }
-                           Float sum = 0.0;
-                           Float t_sum = 0.0;
-                           Float w_sum = 0.0;
-               
-                           for (int k = 0; k < num_inputs; ++k)
-                           {
-                               int in_idx = i_lay_in + k;
-                               sum += var_lwp_tmp[in_idx];
-                               t_sum += var_rel_tmp[in_idx] * var_lwp_tmp[in_idx];
-                               w_sum += var_lwp_tmp[in_idx];
-                           }
-                           var_lwp_out[ilay] = sum;
-                           if (w_sum > 1e-6)
-                           {
-                               var_rel_out[ilay] = t_sum / w_sum;
-                           } 
-                           else 
-                           {
-                               Float avg = 0.0;
-                               for (int k = 0; k < num_inputs; ++k)
-                               {
-                                   int in_idx = (i_lay_in + k);
-                                   avg += var_rel_tmp[in_idx];
-                               }
-                               var_rel_out[ilay] = avg / num_inputs;
-                           }
-                       }
-   
-                       col_results[i].lwp   = std::move(var_lwp_out);
-                       col_results[i].rel   = std::move(var_rel_out);
-                   }
-               }
-           
-               auto time_end_loop = std::chrono::high_resolution_clock::now();
-               auto duration_loop = std::chrono::duration<double, std::milli>(time_end_loop - time_start_loop).count();
-               Status::print_message("Duration liq loop: " + std::to_string(duration_loop) + " (ms)");
-           }
-   
-           if (switch_ice_cloud_optics){
-               Array<Float,1> iwp_compress;
-               iwp_compress.set_dims({n_z_in});
-               Array<Float,1> dei_compress;
-               dei_compress.set_dims({n_z_in});
-               const std::vector<Float> var_iwp = iwp_norm_reshaped.v();
-               const std::vector<Float> var_dei = dei_reshaped.v();
-           
-               Status::print_message("###### Start Loop ######");
-               auto time_start_loop = std::chrono::high_resolution_clock::now();
-               for (int idx_y = 0; idx_y < n_col_y; idx_y++)
-               {
-                   for (int idx_x = 0; idx_x < n_col_x; idx_x++)
-                   {
-                       int i = idx_x + idx_y * n_col_x;
-                       const Array<ijk,1> tilted_path = by_col_paths[i];
-                       const std::vector<ijk>& tilted_path_v = tilted_path.v();
-                       const Array<Float,1> zh_tilt = by_col_zh_tilt[i];
-                       const int n_z_tilt = by_col_n_z_tilt[i];
-                       const int compress_lay_start_idx = by_col_compress_start[i];
-           
-                       std::vector<Float> var_iwp_tmp(n_z_tilt);
-                       std::vector<Float> var_dei_tmp(n_z_tilt);
-                       std::vector<Float> var_iwp_out(n_z_in);
-                       std::vector<Float> var_dei_out(n_z_in);
-                       
-                       for (int ilay=0; ilay < n_z_tilt; ++ilay)
-                       {
-                           Float dz = zh_tilt({ilay + 1}) - zh_tilt({ilay});
-                           const ijk offset = tilted_path_v[ilay];
-                           const int i_col_new  = ((idx_y+offset.j)%n_col_y) * n_col_x + ((idx_x + offset.i)%n_col_x);
-                           const int idx_in = offset.k + i_col_new*n_z_in;
-                           var_iwp_tmp[ilay] = var_iwp[idx_in] * dz;
-                           var_dei_tmp[ilay] = var_dei[idx_in];
-                       }  
-                       
-                       for (int ilay = 0; ilay < compress_lay_start_idx; ++ilay)
-                       {
-                           var_iwp_out[ilay] = var_iwp_tmp[ilay];
-                           var_dei_out[ilay] = var_dei_tmp[ilay];
-                       }
-               
-                       for (int ilay = compress_lay_start_idx; ilay < n_z_in; ++ilay)
-                       {
-                           const int in_offset = ilay - compress_lay_start_idx;
-                           const int i_lay_in = compress_lay_start_idx + 2 * in_offset;
-                           int num_inputs;
-                           if (ilay < (n_z_in - 1)) {
-                               num_inputs = 2;
-                           } 
-                           else {
-                               num_inputs = ((i_lay_in + 1) == (n_z_tilt - 1)) ? 2 : 3;
-                           }
-                           Float sum = 0.0;
-                           Float t_sum = 0.0;
-                           Float w_sum = 0.0;
-               
-                           for (int k = 0; k < num_inputs; ++k)
-                           {
-                               int in_idx = i_lay_in + k;
-                               sum += var_iwp_tmp[in_idx];
-                               t_sum += var_dei_tmp[in_idx] * var_iwp_tmp[in_idx];
-                               w_sum += var_iwp_tmp[in_idx];
-                           }
-                           var_iwp_out[ilay] = sum;
-                           if (w_sum > 1e-6)
-                           {
-                               var_dei_out[ilay] = t_sum / w_sum;
-                           } 
-                           else 
-                           {
-                               Float avg = 0.0;
-                               for (int k = 0; k < num_inputs; ++k)
-                               {
-                                   int in_idx = (i_lay_in + k);
-                                   avg += var_dei_out[in_idx];
-                               }
-                               var_dei_out[ilay] = avg / num_inputs;
-                           }
-                       }
-           
-                       col_results[i].iwp   = std::move(var_iwp_out);
-                       col_results[i].dei   = std::move(var_dei_out);
-                   }
-               }
-           
-               auto time_end_loop = std::chrono::high_resolution_clock::now();
-               auto duration_loop = std::chrono::duration<double, std::milli>(time_end_loop - time_start_loop).count();
-               Status::print_message("Duration ice loop: " + std::to_string(duration_loop) + " (ms)");
-           }
-           
-           post_process_output(col_results, n_col_x, n_col_y, n_z_in, n_zh_in,
-               &lwp_out, &iwp_out, &rel_out, &dei_out,
-               switch_liq_cloud_optics, switch_ice_cloud_optics);
-   
-       }
-   
-       restore_bkg_profile_bundle(n_col_x, n_col_y, 
-           n_lay, n_lev, n_lay, n_lev, 
-           n_z_in, n_zh_in, n_z_in, n_zh_in,
-           &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out, 
-           &lwp_out, &iwp_out, &rel_out, &dei_out, &rh_out,
-           gas_concs_out, aerosol_concs_out, 
-           &p_lay, &t_lay, &p_lev, &t_lev, 
-           &lwp, &iwp, &rel, &dei, &rh,
-           gas_concs, aerosol_concs, 
-           gas_names, aerosol_names,
-           switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics
-       );
+    int n_zh_tilt_center = center_zh_tilt.v().size();
+    int n_z_tilt_center = n_zh_tilt_center - 1;
+
+    tilt_fields(n_z_in, n_zh_in, n_col_x, n_col_y,
+                n_z_tilt_center, n_zh_tilt_center, n_col,
+                zh, z,
+                center_zh_tilt, center_path,
+                &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out, &rh_out,
+                gas_concs_out, gas_names, aerosol_concs_out, aerosol_names, switch_aerosol_optics
+    );
+
+    // compress tilted column layers to original layers
+    compress_fields(n_col_x, n_col_y,
+                    n_z_in, n_zh_in, n_z_tilt_center,
+                    center_path,
+                    center_zh_tilt, zh, z,
+                    &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out, &rh_out,
+                    gas_concs_out, gas_names, aerosol_concs_out, aerosol_names, switch_aerosol_optics);
+
+    ////// SETUP FOR RANDOM START POINT TILTING //////
+    if (switch_cloud_optics)
+    {
+        std::vector<std::pair<Float, Float>> x_y_start_arr(n_col);
+        std::vector<Array<ijk,1>> by_col_paths(n_col);
+        std::vector<Array<Float,1>> by_col_zh_tilt(n_col);
+        std::vector<int> by_col_n_zh_tilt(n_col);
+        std::vector<int> by_col_n_z_tilt(n_col);
+
+        std::mt19937_64 rng;
+        // uint64_t timeSeed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+        // std::seed_seq ss{uint32_t(timeSeed & 0xffffffff), uint32_t(timeSeed>>32)};
+        std::seed_seq ss{rnd_seed};
+        rng.seed(ss);
+        std::uniform_real_distribution<double> unif(0.001, 0.999);
+        for (int i = 0; i < n_col; i++)
+        {
+            Float x_point = unif(rng);
+            Float y_point = unif(rng);
+            x_y_start_arr[i] = std::make_pair(x_point, y_point);
+        }
+
+        Status::print_message("###### Starting Tilting ######");
+#pragma omp parallel for
+        for (int i = 0; i < n_col; i++) {
+            Float x_start = x_y_start_arr[i].first;
+            Float y_start = x_y_start_arr[i].second;
+            Array<ijk,1> path;
+            Array<Float,1> zh_tilt;
+
+            tilted_path(xh.v(), yh.v(), zh.v(), z.v(), sza, azi, x_start, y_start, path.v(), zh_tilt.v());
+            int n_zh_tilt = zh_tilt.v().size();
+            int n_z_tilt = n_zh_tilt - 1;
+
+            path.set_dims({n_z_tilt});
+            zh_tilt.set_dims({n_zh_tilt});
+
+            by_col_paths[i] = path;
+            by_col_zh_tilt[i] = zh_tilt;
+            by_col_n_zh_tilt[i] = n_zh_tilt;
+            by_col_n_z_tilt[i] = n_zh_tilt - 1;
+        }
+
+        Status::print_message("###### Finish Tilting ######");
+
+        const int total_iterations = n_col_x * n_col_y;
+        std::vector<ColumnResult> col_results(total_iterations);
+
+        // Do Normalization and Reshaping OUTSIDE OF LOOP
+        Array<Float,2> lwp_norm_reshaped;
+        lwp_norm_reshaped.set_dims({n_z_in, n_col});
+        Array<Float,2> rel_reshaped;
+        rel_reshaped.set_dims({n_z_in, n_col});
+        Array<Float,2> iwp_norm_reshaped;
+        iwp_norm_reshaped.set_dims({n_z_in, n_col});
+        Array<Float,2> dei_reshaped;
+        dei_reshaped.set_dims({n_z_in, n_col});
+
+        for (int icol = 1; icol <= n_col; ++icol)
+        {
+            for (int ilay = 1; ilay <= n_zh_in; ++ilay)
+            {
+                Float dz = zh({ilay + 1}) - zh({ilay});
+                if (switch_liq_cloud_optics)
+                {
+                    (lwp_norm_reshaped)({ilay, icol}) = (lwp)({icol, ilay})/dz;
+                    (rel_reshaped)({ilay, icol}) = (rel)({icol, ilay});
+                }
+                if (switch_ice_cloud_optics)
+                {
+                    (iwp_norm_reshaped)({ilay, icol}) = (iwp)({icol, ilay})/dz;
+                    (dei_reshaped)({ilay, icol}) = (dei)({icol, ilay});
+                }
+            }
+        }
+
+        if (switch_liq_cloud_optics){
+            const std::vector<Float>& var_lwp = lwp_norm_reshaped.v();
+            const std::vector<Float>& var_rel = rel_reshaped.v();
+
+            Status::print_message("###### Start Loop liquid ######");
+            for (int idx_y = 0; idx_y < n_col_y; idx_y++)
+            {
+                for (int idx_x = 0; idx_x < n_col_x; idx_x++)
+                {
+                    int i = idx_x + idx_y * n_col_x;
+                    const Array<ijk,1>& tilted_path = by_col_paths[i];
+                    const std::vector<ijk>& tilted_path_v = tilted_path.v();
+                    const Array<Float,1>& zh_tilt = by_col_zh_tilt[i];
+                    const int n_z_tilt = by_col_n_z_tilt[i];
+
+                    std::vector<Float> var_lwp_tmp(n_z_tilt);
+                    std::vector<Float> var_rel_tmp(n_z_tilt);
+                    std::vector<Float> var_lwp_out(n_z_in);
+                    std::vector<Float> var_rel_out(n_z_in);
+
+                    // determine lwp in tilted column (at tilted column layers)
+                    for (int ilay=0; ilay < n_z_tilt; ++ilay)
+                    {
+                        Float dz = zh_tilt({ilay + 1}) - zh_tilt({ilay});
+                        const ijk offset = tilted_path_v[ilay];
+                        const int i_col_new  = ((idx_y+offset.j)%n_col_y) * n_col_x + ((idx_x + offset.i)%n_col_x);
+                        const int idx_in = offset.k + i_col_new*n_z_in;
+                        var_lwp_tmp[ilay] = var_lwp[idx_in] * dz;
+                        var_rel_tmp[ilay] = var_rel[idx_in];
+                    }
+
+                    // compress lwp at tilted column layers to original layers
+                    for (int ilay=0; ilay < n_z_in; ++ilay)
+                    {
+                        Float sum = 0.0;
+                        Float t_sum = 0.0;
+                        Float w_sum = 0.0;
+                        int num_inputs = 0;
+                        Float avg = 0.0;
+
+                        for (int ilay_tilt=0; ilay_tilt < n_z_tilt; ++ilay_tilt)
+                        {
+                            const ijk offset = tilted_path_v[ilay_tilt];
+                            if (offset.k == ilay)
+                            {
+                                sum += var_lwp_tmp[ilay_tilt];
+                                t_sum += var_rel_tmp[ilay_tilt] * var_lwp_tmp[ilay_tilt];
+                                w_sum += var_lwp_tmp[ilay_tilt];
+                                num_inputs += 1;
+                                avg += var_rel_tmp[ilay_tilt];
+                            }
+                        }
+                        var_lwp_out[ilay] = sum;
+                        if (w_sum > 1e-6)
+                            var_rel_out[ilay] = t_sum / w_sum;
+                        else
+                            var_rel_out[ilay] = avg / num_inputs;
+                    }
+
+                    col_results[i].lwp   = std::move(var_lwp_out);
+                    col_results[i].rel   = std::move(var_rel_out);
+                }
+            }
+        }
+
+        if (switch_ice_cloud_optics){
+            const std::vector<Float>& var_iwp = iwp_norm_reshaped.v();
+            const std::vector<Float>& var_dei = dei_reshaped.v();
+
+            Status::print_message("###### Start Loop ice ######");
+            for (int idx_y = 0; idx_y < n_col_y; idx_y++)
+            {
+                for (int idx_x = 0; idx_x < n_col_x; idx_x++)
+                {
+                    int i = idx_x + idx_y * n_col_x;
+                    const Array<ijk,1>& tilted_path = by_col_paths[i];
+                    const std::vector<ijk>& tilted_path_v = tilted_path.v();
+                    const Array<Float,1>& zh_tilt = by_col_zh_tilt[i];
+                    const int n_z_tilt = by_col_n_z_tilt[i];
+
+                    std::vector<Float> var_iwp_tmp(n_z_tilt);
+                    std::vector<Float> var_dei_tmp(n_z_tilt);
+                    std::vector<Float> var_iwp_out(n_z_in);
+                    std::vector<Float> var_dei_out(n_z_in);
+
+                    // determine iwp in tilted column (at tilted column layers)
+                    for (int ilay=0; ilay < n_z_tilt; ++ilay)
+                    {
+                        Float dz = zh_tilt({ilay + 1}) - zh_tilt({ilay});
+                        const ijk offset = tilted_path_v[ilay];
+                        const int i_col_new  = ((idx_y+offset.j)%n_col_y) * n_col_x + ((idx_x + offset.i)%n_col_x);
+                        const int idx_in = offset.k + i_col_new*n_z_in;
+                        var_iwp_tmp[ilay] = var_iwp[idx_in] * dz;
+                        var_dei_tmp[ilay] = var_dei[idx_in];
+                    }
+
+                    // compress iwp at tilted column layers to original layers
+                    for (int ilay=0; ilay < n_z_in; ++ilay)
+                    {
+                        Float sum = 0.0;
+                        Float t_sum = 0.0;
+                        Float w_sum = 0.0;
+                        int num_inputs = 0;
+                        Float avg = 0.0;
+
+                        for (int ilay_tilt=0; ilay_tilt < n_z_tilt; ++ilay_tilt)
+                        {
+                            const ijk offset = tilted_path_v[ilay_tilt];
+                            if (offset.k == ilay)
+                            {
+                                sum += var_iwp_tmp[ilay_tilt];
+                                t_sum += var_dei_tmp[ilay_tilt] * var_iwp_tmp[ilay_tilt];
+                                w_sum += var_iwp_tmp[ilay_tilt];
+                                num_inputs += 1;
+                                avg += var_dei_tmp[ilay_tilt];
+                            }
+                        }
+                        var_iwp_out[ilay] = sum;
+                        if (w_sum > 1e-6)
+                            var_dei_out[ilay] = t_sum / w_sum;
+                        else
+                            var_dei_out[ilay] = avg / num_inputs;
+                    }
+
+                    col_results[i].iwp   = std::move(var_iwp_out);
+                    col_results[i].dei   = std::move(var_dei_out);
+                }
+            }
+        }
+
+        post_process_output(col_results, n_col_x, n_col_y, n_z_in, n_zh_in,
+                            &lwp_out, &iwp_out, &rel_out, &dei_out,
+                            switch_liq_cloud_optics, switch_ice_cloud_optics);
+
+    }
+
+    restore_bkg_profile_bundle(n_col_x, n_col_y,
+                               n_lay, n_lev, n_lay, n_lev,
+                               n_z_in, n_zh_in, n_z_in, n_zh_in,
+                               &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out,
+                               &lwp_out, &iwp_out, &rel_out, &dei_out, &rh_out,
+                               gas_concs_out, aerosol_concs_out,
+                               &p_lay, &t_lay, &p_lev, &t_lev,
+                               &lwp, &iwp, &rel, &dei, &rh,
+                               gas_concs, aerosol_concs,
+                               gas_names, aerosol_names,
+                               switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics
+    );
 }
 
 void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
@@ -1175,7 +1044,6 @@ void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
     const int idx_top = zh.v().size() -1;   // -1 as zh is one longer than z (at which tilted path is defined)
     for (int ilev=0; ilev<idx_top; ++ilev)
     {
-        std::cout<<ilev<<std::endl;
         for (int k=0; k<zh_tilt.v().size(); ++k)
         {
             if (zh_tilt.v()[k] == zh.v()[ilev])
@@ -1192,13 +1060,10 @@ void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
         }
     }
 
-    std::cout<<"domain done"<<std::endl;
-
     const int idx_top_tilt = zh_tilt.v().size()-2;       // -2: -1 for index starting at zero and -1 as zh is one longer than z
     const ijk offset_tod = tilted_path[idx_top_tilt];
     for (int ilev=idx_top; ilev < n_lev_in; ++ilev)
     {
-        std::cout<<ilev<<std::endl;
         for (int iy = 0; iy < n_y; ++iy)
             for (int ix = 0; ix < n_x; ++ix)
             {
