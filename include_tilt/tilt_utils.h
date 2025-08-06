@@ -75,6 +75,7 @@ void compress_columns_weighted_avg(const int n_x, const int n_y,
 
 void compress_columns_p_or_t(const int n_x, const int n_y, 
                       const int n_out_lay,  const int n_tilt,
+                      const Array<ijk,1>& path,
                       const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
                       const Array<Float,1>& z,
                       std::vector<Float>& var_lev, std::vector<Float>& var_lay);

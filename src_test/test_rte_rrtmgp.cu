@@ -493,6 +493,8 @@ void solve_radiation(int argc, char** argv)
 
             gas_concs = gas_concs_out;
             aerosol_concs = aerosol_concs_out;
+
+            Status::print_message("tilted path created");
         }
     }
 

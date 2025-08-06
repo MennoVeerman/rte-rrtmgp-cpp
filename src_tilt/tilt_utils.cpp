@@ -403,33 +403,52 @@ void compress_columns_weighted_avg(const int n_x, const int n_y,
 
 void compress_columns_p_or_t(const int n_x, const int n_y, 
                       const int n_out_lay,  const int n_tilt,
+                      const Array<ijk,1>& path,
                       const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
                       const Array<Float,1>& z,
                       std::vector<Float>& var_lev, std::vector<Float>& var_lay)
 {
     std::vector<Float> var_tmp_lay(n_out_lay * n_x * n_y);
     std::vector<Float> var_tmp_lev((n_out_lay + 1) * n_x * n_y);
+    const std::vector<ijk>& tilted_path_v = path.v();
 
     // temperature and pressure at original levels can be taken directly from the same height in the tilted column
     #pragma omp parallel for
-    for (int ilev = 0; ilev < (n_out_lay + 1); ++ilev)
+    for (int ilev = 0; ilev < n_out_lay; ++ilev)
     {
         for (int iy = 0; iy < n_y; ++iy)
         {
             for (int ix = 0; ix < n_x; ++ix)
             {
+                int num_inputs = 0;
                 for (int ilev_tilt = 0; ilev_tilt < (n_tilt + 1); ++ilev_tilt)
                 {
-                    if (zh.v()[ilev] == zh_tilt.v()[ilev_tilt])
+                    const ijk offset = tilted_path_v[ilev_tilt];
+                    if (offset.k == ilev && num_inputs == 0)
                     {
                         const int out_idx = ix + iy * n_x + ilev * n_x * n_y;
                         const int in_idx = ix + iy * n_x + ilev_tilt * n_x * n_y;
                         var_tmp_lev[out_idx] = var_lev[in_idx];
+                        num_inputs += 1;
                     }
                 }
             }
         }
     }
+
+    // determine pressure at the top separately as the tilted path (and offset) are at the layers
+    int ilev = n_out_lay;
+    int ilev_tilt = n_tilt;
+    for (int iy = 0; iy < n_y; ++iy)
+    {
+        for (int ix = 0; ix < n_x; ++ix)
+        {
+            const int out_idx = ix + iy * n_x + ilev * n_x * n_y;
+            const int in_idx = ix + iy * n_x + ilev_tilt * n_x * n_y;
+            var_tmp_lev[out_idx] = var_lev[in_idx];
+        }
+    }
+
 
     // height of layer center differs between the original column and the tilted column, so we interpolate between the levels
     // weighted interpolation based on z, as in the interpolation function
@@ -589,20 +608,20 @@ void compress_fields(const int n_col_x, const int n_col_y,
         }
     }
     compress_columns_p_or_t(n_col_x, n_col_y, n_z_in, n_z_tilt,
+                            center_path,
                             center_zh_tilt, zh,
                             z,
                             p_lev_copy->v(), p_lay_copy->v());
     p_lay_copy->expand_dims({n_col, n_z_in});
     p_lev_copy->expand_dims({n_col, n_zh_in});
     compress_columns_p_or_t(n_col_x, n_col_y, n_z_in, n_z_tilt,
+                            center_path,
                             center_zh_tilt, zh,
                             z,
                             t_lev_copy->v(), t_lay_copy->v());
     t_lay_copy->expand_dims({n_col, n_z_in});
     t_lev_copy->expand_dims({n_col, n_zh_in});
 
-    p_lay_copy->dump("p_lay_dump");
-    p_lev_copy->dump("p_lev_dump");
 }
 
 void create_tilted_columns(const int n_x, const int n_y, const int n_lay_in, const int n_lev_in,
@@ -639,6 +658,8 @@ void interpolate(const int n_x, const int n_y, const int n_lay_in, const int n_l
 {
     int zp_in_zh = -1; // half level
     int zp_in_zf = -1; // full level
+    // MT: the 1e-2 here seems a remnant from when the tilted path did not included steps smaller than 2 cm.
+    // currently, using this assumption here creates the need for pressure check after the call to this interpolate function
     for (int ilev=0; ilev<n_lev_in; ++ilev)
         if (std::abs(zh_in[ilev]-zp) < 1e-2)
             zp_in_zh= ilev;
@@ -831,7 +852,6 @@ void tica_tilt(
             x_y_start_arr[i] = std::make_pair(x_point, y_point);
         }
 
-        Status::print_message("###### Starting Tilting ######");
 #pragma omp parallel for
         for (int i = 0; i < n_col; i++) {
             Float x_start = x_y_start_arr[i].first;
@@ -851,8 +871,6 @@ void tica_tilt(
             by_col_n_zh_tilt[i] = n_zh_tilt;
             by_col_n_z_tilt[i] = n_zh_tilt - 1;
         }
-
-        Status::print_message("###### Finish Tilting ######");
 
         const int total_iterations = n_col_x * n_col_y;
         std::vector<ColumnResult> col_results(total_iterations);
@@ -889,7 +907,6 @@ void tica_tilt(
             const std::vector<Float>& var_lwp = lwp_norm_reshaped.v();
             const std::vector<Float>& var_rel = rel_reshaped.v();
 
-            Status::print_message("###### Start Loop liquid ######");
             for (int idx_y = 0; idx_y < n_col_y; idx_y++)
             {
                 for (int idx_x = 0; idx_x < n_col_x; idx_x++)
@@ -954,7 +971,6 @@ void tica_tilt(
             const std::vector<Float>& var_iwp = iwp_norm_reshaped.v();
             const std::vector<Float>& var_dei = dei_reshaped.v();
 
-            Status::print_message("###### Start Loop ice ######");
             for (int idx_y = 0; idx_y < n_col_y; idx_y++)
             {
                 for (int idx_x = 0; idx_x < n_col_x; idx_x++)

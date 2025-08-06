@@ -478,10 +478,7 @@ void solve_radiation(int argc, char** argv)
         tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
         int n_z_tilt_center = center_zh_tilt.v().size() - 1;
 
-        Status::print_message("tilted path created");
-
-        if (n_z_tilt_center > 4 * n_lay)
-            do_tilting = false;
+        std::cout<<n_z_tilt_center<<std::endl;
 
         if (do_tilting)
         {
@@ -563,6 +560,8 @@ void solve_radiation(int argc, char** argv)
             t_lev = t_lev_out;
             gas_concs = gas_concs_out;
             aerosol_concs = aerosol_concs_out;
+
+            Status::print_message("tilted path created");
         }
     }
 
