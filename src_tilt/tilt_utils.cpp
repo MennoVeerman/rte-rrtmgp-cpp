@@ -23,8 +23,8 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
                  std::vector<ijk>& tilted_path,
                  std::vector<Float>& zh_tilted)
 {
-    const Float dx = xh[1]-xh[0]; 
-    const Float dy = yh[1]-yh[0]; 
+    const Float dx = xh[1]-xh[0];
+    const Float dy = yh[1]-yh[0];
     const Float z_top = *std::max_element(zh.begin(), zh.end());
     const int n_x = xh.size()-1;
     const int n_y = yh.size()-1;
@@ -43,19 +43,19 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
 
     Float dir_x = std::sin(sza) * std::sin(azi); // azi 0 is from the north
     Float dir_y = std::sin(sza) * std::cos(azi);
-    Float dir_z = std::cos(sza);  
+    Float dir_z = std::cos(sza);
 
     int z_idx = -1;
-    
+
     const Float epsilon = 1e-8; // Small value to handle floating-point precision
     const Float min_step = 1e-2; // Minimum step size in meters
-    
+
     tilted_path.push_back({i, j, k}); // Add starting point
     dz_tilted.push_back(0.0);
     z_idx = 0;
-    
+
     while (zp < z_top)
-    {           
+    {
         // Check bounds before accessing arrays
         if (k + 1 >= zh.size()) {
             std::cerr << "Error: k+1 (" << k + 1 << ") out of bounds for zh (size=" << zh.size() << ")" << std::endl;
@@ -69,11 +69,11 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
             std::cerr << "Error: i+1 (" << i + 1 << ") out of bounds for xh (size=" << xh.size() << ")" << std::endl;
             break;
         }
-        
+
         // Calculate distances to next cell boundaries
-        Float lz = (std::abs(dir_z) < epsilon) ? 
+        Float lz = (std::abs(dir_z) < epsilon) ?
                     100000.: (zh[k+1] - zp) / dir_z;
-        
+
         // Handle cases where we're extremely close to a boundary
         if (std::abs(zp - zh[k+1]) < epsilon && dir_z > 0) {
             k += 1;
@@ -83,7 +83,7 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
             }
             continue;
         }
-        
+
         Float ly;
         if (std::abs(dir_y) < epsilon) {
             ly = 100000.;
@@ -104,7 +104,7 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
             }
             ly = (yh[j+1] - yp) / dir_y;
         }
-        
+
         Float lx;
         if (std::abs(dir_x) < epsilon) {
             lx = 100000.;
@@ -134,10 +134,10 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
         xp += dx0;
         yp += dy0;
         zp += dz0;
-        
+
         // Record the path segment
         dz_tilted[z_idx] += dz0;
-        
+
         // Record boundary crossing
         if ((std::abs(l - lx) < epsilon) ||  (std::abs(l - ly) < epsilon) || ( (std::abs(l - lz) < epsilon || zp >= zh[k+1]))){
             // Create a new path segment after crossing boundary
@@ -150,23 +150,23 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
         if ((std::abs(l - lz) < epsilon || zp >= zh[k+1])) {
             k += 1;
         }
-        
+
         // Check y boundary crossing
         if (std::abs(l - ly) < epsilon) {
 
             j = int(j + sign(dy0));
             j = (j == -1) ? n_y - 1 : j%n_y;
             yp = dy0 < 0 ? yh[j+1] : yh[j];
-            
+
         }
-        
+
         // Check x boundary crossing
         if (std::abs(l - lx) < epsilon) {
             i = int(i + sign(dx0));
             i = (i == -1) ? n_x - 1 : i%n_x;
             xp = dx0 < 0 ? xh[i+1] : xh[i];
         }
-    }    
+    }
     // Construct final zh_tilted
     zh_tilted.clear();
     zh_tilted.push_back(0.);
@@ -175,19 +175,19 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
     }
 }
 
-void restore_bkg_profile(const int n_x, const int n_y, 
+void restore_bkg_profile(const int n_x, const int n_y,
                       const int n_full,
                       const int n_tilt,
-                      const int bkg_start, 
+                      const int bkg_start,
                       std::vector<Float>& var,
                       std::vector<Float>& var_w_bkg)
 {
     const int n_out = n_tilt + (n_full - bkg_start);
 
-    std::vector<Float> var_tmp(n_out * n_x * n_y);    
+    std::vector<Float> var_tmp(n_out * n_x * n_y);
     #pragma omp parallel for
     for (int ilay = 0; ilay < n_tilt; ++ilay)
-    {        
+    {
         for (int iy = 0; iy < n_y; ++iy)
         {
             for (int ix = 0; ix < n_x; ++ix)
@@ -215,17 +215,17 @@ void restore_bkg_profile(const int n_x, const int n_y,
     var = var_tmp;
 }
 
-void restore_bkg_profile_bundle(const int n_col_x, const int n_col_y, 
-    const int n_lay, const int n_lev, 
-    const int n_lay_tot, const int n_lev_tot, 
+void restore_bkg_profile_bundle(const int n_col_x, const int n_col_y,
+    const int n_lay, const int n_lev,
+    const int n_lay_tot, const int n_lev_tot,
     const int n_z_in, const int n_zh_in,
-    const int bkg_start_z, const int bkg_start_zh, 
-    Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy, 
-    Array<Float,2>* lwp_copy, Array<Float,2>* iwp_copy, Array<Float,2>* rel_copy, Array<Float,2>* dei_copy, Array<Float,2>* rh_copy, 
+    const int bkg_start_z, const int bkg_start_zh,
+    Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy,
+    Array<Float,2>* lwp_copy, Array<Float,2>* iwp_copy, Array<Float,2>* rel_copy, Array<Float,2>* dei_copy, Array<Float,2>* rh_copy,
     Gas_concs& gas_concs_copy, Aerosol_concs& aerosol_concs_copy,
-    Array<Float,2>* p_lay, Array<Float,2>* t_lay, Array<Float,2>* p_lev, Array<Float,2>* t_lev, 
-    Array<Float,2>* lwp, Array<Float,2>* iwp, Array<Float,2>* rel, Array<Float,2>* dei, Array<Float,2>* rh, 
-    Gas_concs& gas_concs, Aerosol_concs& aerosol_concs, 
+    Array<Float,2>* p_lay, Array<Float,2>* t_lay, Array<Float,2>* p_lev, Array<Float,2>* t_lev,
+    Array<Float,2>* lwp, Array<Float,2>* iwp, Array<Float,2>* rel, Array<Float,2>* dei, Array<Float,2>* rh,
+    Gas_concs& gas_concs, Aerosol_concs& aerosol_concs,
     const std::vector<std::string>& gas_names, const std::vector<std::string>& aerosol_names,
     bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics
 )
@@ -258,17 +258,17 @@ void restore_bkg_profile_bundle(const int n_col_x, const int n_col_y,
         if (gas.size() > 1) {
             std::vector<Float> gas_copy = gas.v();
             std::vector<Float> gas_full_copy = gas_full.v();
-            restore_bkg_profile(n_col_x, n_col_y, 
-                                n_lay, n_z_in, 
-                                bkg_start_z, 
+            restore_bkg_profile(n_col_x, n_col_y,
+                                n_lay, n_z_in,
+                                bkg_start_z,
                                 gas_copy, gas_full_copy);
-            
+
             Array<Float,2> gas_tmp({n_col, n_lay_tot});
             gas_tmp = std::move(gas_copy);
             gas_tmp.expand_dims({n_col, n_lay_tot});
-            
+
             gas_concs_copy.set_vmr(gas_name, gas_tmp);
-            
+
         }
     }
     if (switch_aerosol_optics)
@@ -287,41 +287,41 @@ void restore_bkg_profile_bundle(const int n_col_x, const int n_col_y,
             if (gas.size() > 1) {
                 std::vector<Float> gas_copy = gas.v();
                 std::vector<Float> gas_full_copy = gas_full.v();
-                restore_bkg_profile(n_col_x, n_col_y, 
-                                    n_lay, n_z_in, 
-                                    bkg_start_z, 
+                restore_bkg_profile(n_col_x, n_col_y,
+                                    n_lay, n_z_in,
+                                    bkg_start_z,
                                     gas_copy, gas_full_copy);
-                
+
                 Array<Float,2> gas_tmp({n_col, n_lay_tot});
                 gas_tmp = std::move(gas_copy);
                 gas_tmp.expand_dims({n_col, n_lay_tot});
-                
+
                 aerosol_concs_copy.set_vmr(aerosol_name, gas_tmp);
-                
+
             }
         }
     }
 
-    restore_bkg_profile(n_col_x, n_col_y, 
-                        n_lay, n_z_in, 
-                        bkg_start_z, 
+    restore_bkg_profile(n_col_x, n_col_y,
+                        n_lay, n_z_in,
+                        bkg_start_z,
                         p_lay_copy->v(), p_lay->v());
     p_lay_copy->expand_dims({n_col, n_lay_tot});
 
-    restore_bkg_profile(n_col_x, n_col_y, 
-                        n_lay, n_z_in, 
-                        bkg_start_z, 
+    restore_bkg_profile(n_col_x, n_col_y,
+                        n_lay, n_z_in,
+                        bkg_start_z,
                         t_lay_copy->v(), t_lay->v());
     t_lay_copy->expand_dims({n_col, n_lay_tot});
 
-    restore_bkg_profile(n_col_x, n_col_y, 
-                        n_lev, n_zh_in, 
-                        bkg_start_zh, 
+    restore_bkg_profile(n_col_x, n_col_y,
+                        n_lev, n_zh_in,
+                        bkg_start_zh,
                         p_lev_copy->v(), p_lev->v());
     p_lev_copy->expand_dims({n_col, n_lev_tot});
-    restore_bkg_profile(n_col_x, n_col_y, 
-                        n_lev, n_zh_in, 
-                        bkg_start_zh, 
+    restore_bkg_profile(n_col_x, n_col_y,
+                        n_lev, n_zh_in,
+                        bkg_start_zh,
                         t_lev_copy->v(), t_lev->v());
     t_lev_copy->expand_dims({n_col, n_lev_tot});
 }
@@ -356,8 +356,8 @@ void post_process_output(const std::vector<ColumnResult>& col_results,
     }
 }
 
-void compress_columns_weighted_avg(const int n_x, const int n_y,  
-                      const int n_out, 
+void compress_columns_weighted_avg(const int n_x, const int n_y,
+                      const int n_out,
                       const int n_tilt,
                       const Array<ijk,1>& path,
                       std::vector<Float>& var, std::vector<Float>& p_lev)
@@ -609,7 +609,7 @@ void create_tilted_columns(const int n_x, const int n_y, const int n_lay_in, con
                 const int idx_out  = ix + iy*n_y + ilay*n_y*n_x;
                 const int idx_in = (ix + offset.i)%n_x + (iy+offset.j)%n_y * n_x + offset.k*n_y*n_x;
                 var_tmp[idx_out] = var[idx_in];
-            } 
+            }
     }
 
     var.resize(var_tmp.size());
@@ -626,10 +626,10 @@ void interpolate(const int n_x, const int n_y, const int n_lay_in, const int n_l
         int posf_bot = 0;
         for (int ilev=0; ilev<n_lev_in-1; ++ilev)
             if (zh_in[ilev] < zp)
-                posh_bot = ilev;     
+                posh_bot = ilev;
         for (int ilay=0; ilay<n_lay_in; ++ilay)
             if (zf_in[ilay] < zp)
-                posf_bot = ilay;         
+                posf_bot = ilay;
         const Float* p_top;
         const Float* p_bot;
         Float  z_top;
@@ -713,7 +713,7 @@ void create_tilted_columns_levlay(const int n_x, const int n_y, const int n_lay_
         {
             const int idx = ix + iy*n_y;
             var_lev_tmp[idx] = var_lev[idx];
-        } 
+        }
 
     #pragma omp parallel for
     for (int ilev=1; ilev<n_lev; ++ilev)

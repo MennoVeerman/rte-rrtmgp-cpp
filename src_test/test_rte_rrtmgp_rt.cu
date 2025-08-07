@@ -300,6 +300,12 @@ void solve_radiation(int argc, char** argv)
         switch_independent_column = true;
     }
 
+    if (switch_cloud_mie && switch_ice_cloud_optics)
+    {
+        std::string error = "Thou shall not use mie tables as long as ice optics are enabled";
+        throw std::runtime_error(error);
+    }
+
     // Print the options to the screen.
     print_command_line_options(command_line_switches, command_line_ints);
 
@@ -457,19 +463,46 @@ void solve_radiation(int argc, char** argv)
     {
         tica_sza = acos(mu0.v()[0]);
         tica_azi = azi.v()[0];
+        for (int icol=1; icol<=n_col; ++icol)
+        {
+            mu0({icol}) = 1.0;
+            azi({icol}) = 0.0;
+        }    
 
+        std::vector<std::string> gas_names = {
+            "h2o", "co2", "o3", "n2o", "co", "ch4", "o2", "n2", "ccl4", "cfc11", 
+            "cfc12", "cfc22", "hfc143a", "hfc125", "hfc23", "hfc32", "hfc134a", 
+            "cf4", "no2"
+        };
+        std::vector<std::string> aerosol_names = {
+            "aermr01", "aermr02", "aermr03", "aermr04", "aermr05", "aermr06", "aermr07", 
+            "aermr08", "aermr09", "aermr10","aermr11"
+        };
+
+        for (const auto& aerosol_name : aerosol_names) {
+            if (!aerosol_concs.exists(aerosol_name)) {
+                continue;
+            }
+            const Array<Float,2>& gas = aerosol_concs.get_vmr(aerosol_name);
+            if (gas.size() > 1) {
+                if (gas.get_dims()[0] == 1){
+                    aerosol_concs.set_vmr(aerosol_name, aerosol_concs.get_vmr(aerosol_name).subset({ {{1,n_col}, {1, n_lay}}} ));
+                }
+            }
+        }
+        
         Array<Float,1> xh;
         Array<Float,1> yh;
         Array<Float,1> zh;
         Array<Float,1> z;
 
         xh.set_dims({n_col_x+1});
-        xh = std::move(input_nc.get_variable<Float>("xh", {n_col_x+1})); 
+        xh = std::move(input_nc.get_variable<Float>("xh", {n_col_x+1}));
         yh.set_dims({n_col_y+1});
-        yh = std::move(input_nc.get_variable<Float>("yh", {n_col_y+1})); 
+        yh = std::move(input_nc.get_variable<Float>("yh", {n_col_y+1}));
 
         zh.set_dims({n_zh_in});
-        zh = std::move(input_nc.get_variable<Float>("zh", {n_zh_in})); 
+        zh = std::move(input_nc.get_variable<Float>("zh", {n_zh_in}));
         z.set_dims({n_z_in});
         z = std::move(input_nc.get_variable<Float>("z", {n_z_in}));
 
