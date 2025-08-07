@@ -480,11 +480,17 @@ void solve_radiation(int argc, char** argv)
             iwp_out.expand_dims({n_col, n_lay});
             dei_out.expand_dims({n_col, n_lay});
 
+            if (switch_aerosol_optics)
+            {
+                rh_out.expand_dims({n_col, n_lay});
+                rh  = rh_out;
+                aerosol_concs = aerosol_concs_out;
+            }
+
             lwp = lwp_out;
             rel = rel_out;
             iwp = iwp_out;
             dei = dei_out;
-            rh = rh_out;
 
             p_lay = p_lay_out;
             p_lev = p_lev_out;
@@ -492,7 +498,6 @@ void solve_radiation(int argc, char** argv)
             t_lev = t_lev_out;
 
             gas_concs = gas_concs_out;
-            aerosol_concs = aerosol_concs_out;
 
             Status::print_message("tilted path created");
         }

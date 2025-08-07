@@ -360,7 +360,7 @@ void compress_columns_weighted_avg(const int n_x, const int n_y,
                       const int n_out, 
                       const int n_tilt,
                       const Array<ijk,1>& path,
-                      std::vector<Float>& var, std::vector<Float>& var_weighting)
+                      std::vector<Float>& var, std::vector<Float>& p_lev)
 {
     std::vector<Float> var_tmp(n_out * n_x * n_y);
     const std::vector<ijk>& tilted_path_v = path.v();
@@ -384,8 +384,10 @@ void compress_columns_weighted_avg(const int n_x, const int n_y,
                     if (offset.k == ilay)
                     {
                         int in_idx = ix + iy * n_x + ilay_tilt * n_x * n_y;
-                        t_sum += var[in_idx] * var_weighting[in_idx];
-                        w_sum += var_weighting[in_idx];
+                        int in_idx_top = ix + iy * n_x + (ilay_tilt + 1) * n_x * n_y;
+                        const Float dp_local =  abs(p_lev[in_idx] - p_lev[in_idx_top]);
+                        t_sum += var[in_idx] * dp_local;
+                        w_sum += dp_local;
                         avg += var[in_idx];
                         num_inputs += 1;
                     }
@@ -470,15 +472,51 @@ void compress_columns_p_or_t(const int n_x, const int n_y,
     var_lay = var_tmp_lay;
 }
 
-void tilt_fields(const int n_z_in, const int n_zh_in, const int n_col_x, const int n_col_y,
+void tilt_and_compress_fields(const int n_z_in, const int n_zh_in, const int n_col_x, const int n_col_y,
     const int n_z_tilt, const int n_zh_tilt, const int n_col,
     const Array<Float,1>& zh, const Array<Float,1>& z,
     const Array<Float,1>& zh_tilt, const Array<ijk,1>& path,
     Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy, 
     Array<Float,2>* rh_copy, 
     Gas_concs& gas_concs_copy, const std::vector<std::string>& gas_names,
-    Aerosol_concs& aerosol_concs_copy, const std::vector<std::string>& aerosol_names, const bool switch_aerosol_optics
-) {
+    Aerosol_concs& aerosol_concs_copy, const std::vector<std::string>& aerosol_names, const bool switch_aerosol_optics)
+{
+    // Create tilted columns for T and p. Important: create T first!!
+    create_tilted_columns_levlay(n_col_x, n_col_y, n_z_in, n_zh_in, zh.v(), z.v(), zh_tilt.v(), path.v(), t_lay_copy->v(), t_lev_copy->v());
+    t_lay_copy->expand_dims({n_col, n_z_tilt});
+    t_lev_copy->expand_dims({n_col, n_zh_tilt});
+    compress_columns_p_or_t(n_col_x, n_col_y, n_z_in, n_z_tilt,
+                            path,
+                            zh_tilt, zh,
+                            z,
+                            t_lev_copy->v(), t_lay_copy->v());
+    t_lay_copy->expand_dims({n_col, n_z_in});
+    t_lev_copy->expand_dims({n_col, n_zh_in});
+
+    create_tilted_columns_levlay(n_col_x, n_col_y, n_z_in, n_zh_in, zh.v(), z.v(), zh_tilt.v(), path.v(), p_lay_copy->v(), p_lev_copy->v());
+    p_lay_copy->expand_dims({n_col, n_z_tilt});
+    p_lev_copy->expand_dims({n_col, n_zh_tilt});
+    // do not compress P here, as pressure at tilted levels is required for weighting of gasses and aerosol
+
+    for (int ilay=0; ilay<n_zh_tilt; ++ilay) {
+        for (int iy=0; iy<n_col_y; ++iy) {
+            for (int ix=0; ix<n_col_x; ++ix) {
+                if (ilay > 0) {
+                    const int curr_idx = ix + iy*n_col_x + ilay*n_col_x*n_col_y;
+                    const int prev_idx = ix + iy*n_col_x + (ilay-1)*n_col_x*n_col_y;
+                    if (p_lev_copy->v()[curr_idx] == p_lev_copy->v()[prev_idx]) {
+                        p_lev_copy->v()[curr_idx] = p_lev_copy->v()[prev_idx] * 0.99999;
+                    }
+                    else if (p_lev_copy->v()[curr_idx] > p_lev_copy->v()[prev_idx])
+                    {
+                        throw std::runtime_error("Pressure INCREASED at layer " + std::to_string(ilay));
+                    }
+                }
+            }
+        }
+    }
+
+    // gasses
     for (const auto& gas_name : gas_names) {
         if (!gas_concs_copy.exists(gas_name)) {
             continue;
@@ -489,6 +527,12 @@ void tilt_fields(const int n_z_in, const int n_zh_in, const int n_col_x, const i
                 Array<Float,2> gas_tmp(gas);
                 create_tilted_columns(n_col_x, n_col_y, n_z_in, n_zh_in, zh_tilt.v(), path.v(), gas_tmp.v());
                 gas_tmp.expand_dims({n_col, n_z_tilt});
+                compress_columns_weighted_avg(n_col_x, n_col_y,
+                                              n_z_in, n_z_tilt,
+                                              path,
+                                              gas_tmp.v(),
+                                              p_lev_copy->v());
+                gas_tmp.expand_dims({n_col, n_z_in});
                 gas_concs_copy.set_vmr(gas_name, gas_tmp);
             }
             else {
@@ -497,22 +541,36 @@ void tilt_fields(const int n_z_in, const int n_zh_in, const int n_col_x, const i
         } 
     }
 
+    // aerosols
     if (switch_aerosol_optics)
     {
+        // should we just recompute relative humidity after tilting water vapour and temperature?
         create_tilted_columns(n_col_x, n_col_y, n_z_in, n_zh_in, zh_tilt.v(), path.v(), rh_copy->v());
         rh_copy->expand_dims({n_col, n_z_tilt});
+        compress_columns_weighted_avg(n_col_x, n_col_y,
+                                      n_z_in, n_z_tilt,
+                                      path,
+                                      rh_copy->v(),
+                                      p_lev_copy->v());
+        rh_copy->expand_dims({n_col, n_z_in});
 
         for (const auto& aerosol_name : aerosol_names) {
             if (!aerosol_concs_copy.exists(aerosol_name)) {
                 continue;
             }
-            const Array<Float,2>& gas = aerosol_concs_copy.get_vmr(aerosol_name);
+            const Array<Float,2>& aerosol = aerosol_concs_copy.get_vmr(aerosol_name);
 
-            if (gas.size() > 1) {
-                if (gas.get_dims()[0] > 1) { // checking: do we have 3D field?
-                    Array<Float,2> gas_tmp(gas);
+            if (aerosol.size() > 1) {
+                if (aerosol.get_dims()[0] > 1) { // checking: do we have 3D field?
+                    Array<Float,2> gas_tmp(aerosol);
                     create_tilted_columns(n_col_x, n_col_y, n_z_in, n_zh_in, zh_tilt.v(), path.v(), gas_tmp.v());
                     gas_tmp.expand_dims({n_col, n_z_tilt});
+                    compress_columns_weighted_avg(n_col_x, n_col_y,
+                                                                  n_z_in, n_z_tilt,
+                                                                  path,
+                                                                  gas_tmp.v(),
+                                                                  p_lev_copy->v());
+                    gas_tmp.expand_dims({n_col, n_z_in});
                     aerosol_concs_copy.set_vmr(aerosol_name, gas_tmp);
                 }
                 else {
@@ -522,106 +580,14 @@ void tilt_fields(const int n_z_in, const int n_zh_in, const int n_col_x, const i
         }
     }
 
-
-    // Create tilted columns for T and p. Important: create T first!!
-    create_tilted_columns_levlay(n_col_x, n_col_y, n_z_in, n_zh_in, zh.v(), z.v(), zh_tilt.v(), path.v(), t_lay_copy->v(), t_lev_copy->v());
-    create_tilted_columns_levlay(n_col_x, n_col_y, n_z_in, n_zh_in, zh.v(), z.v(), zh_tilt.v(), path.v(), p_lay_copy->v(), p_lev_copy->v());
-
-    t_lay_copy->expand_dims({n_col, n_z_tilt});
-    t_lev_copy->expand_dims({n_col, n_zh_tilt});
-    p_lay_copy->expand_dims({n_col, n_z_tilt});
-    p_lev_copy->expand_dims({n_col, n_zh_tilt});
-
-    for (int ilay=0; ilay<n_zh_tilt; ++ilay) {
-        for (int iy=0; iy<n_col_y; ++iy) {
-            for (int ix=0; ix<n_col_x; ++ix) {
-                if (ilay > 0) {
-                    const int curr_idx = ix + iy*n_col_x + ilay*n_col_x*n_col_y;
-                    const int prev_idx = ix + iy*n_col_x + (ilay-1)*n_col_x*n_col_y;
-                    if (p_lev_copy->v()[curr_idx] == p_lev_copy->v()[prev_idx]) {
-                        p_lev_copy->v()[curr_idx] = p_lev_copy->v()[prev_idx] * 0.99999;
-                    } 
-                    else if (p_lev_copy->v()[curr_idx] > p_lev_copy->v()[prev_idx]) 
-                    {
-                        throw std::runtime_error("Pressure INCREASED at layer " + std::to_string(ilay));
-                    }
-                }
-            }
-        }
-    }
-}
-
-void compress_fields(const int n_col_x, const int n_col_y,
-    const int n_z_in, const int n_zh_in,  const int n_z_tilt,
-    const Array<ijk,1>& center_path,
-    const Array<Float,1>& center_zh_tilt, const Array<Float,1>& zh,
-    const Array<Float,1>& z,
-    Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy, 
-    Array<Float,2>* rh_copy, 
-    Gas_concs& gas_concs_copy, std::vector<std::string>& gas_names,
-    Aerosol_concs& aerosol_concs_copy, std::vector<std::string>& aerosol_names, const bool switch_aerosol_optics)
-{
-    const int n_col = n_col_x*n_col_y;
-
-    for (const auto& gas_name : gas_names) {
-        if (!gas_concs_copy.exists(gas_name)) {
-            continue;
-        }
-        const Array<Float,2>& gas = gas_concs_copy.get_vmr(gas_name);
-        if (gas.size() > 1) {
-            Array<Float,2> gas_tmp(gas);
-            compress_columns_weighted_avg(n_col_x, n_col_y,
-                                            n_z_in, n_z_tilt,
-                                            center_path,
-                                            gas_tmp.v(), 
-                                            p_lay_copy->v());
-            gas_tmp.expand_dims({n_col, n_z_in});
-            gas_concs_copy.set_vmr(gas_name, gas_tmp);
-        }
-    }
-
-    if (switch_aerosol_optics)
-    {
-        std::vector<Float> ones(p_lay_copy->v().size(), 1.0);
-        compress_columns_weighted_avg(n_col_x, n_col_y,
-            n_z_in, n_z_tilt,
-            center_path,
-            rh_copy->v(), 
-            ones);
-        rh_copy->expand_dims({n_col, n_z_in});
-
-        for (const auto& aerosol_name : aerosol_names) {
-            if (!aerosol_concs_copy.exists(aerosol_name)) {
-                continue;
-            }
-            const Array<Float,2>& gas = aerosol_concs_copy.get_vmr(aerosol_name);
-            if (gas.size() > 1) {
-                Array<Float,2> gas_tmp(gas);
-                compress_columns_weighted_avg(n_col_x, n_col_y,
-                                                n_z_in, n_z_tilt,
-                                                center_path,
-                                                gas_tmp.v(), 
-                                                p_lay_copy->v());
-                gas_tmp.expand_dims({n_col, n_z_in});
-                aerosol_concs_copy.set_vmr(aerosol_name, gas_tmp);
-            }
-        }
-    }
+    // compression of P at the end, as pressure at tilted levels is required for weighting of gasses and aerosol
     compress_columns_p_or_t(n_col_x, n_col_y, n_z_in, n_z_tilt,
-                            center_path,
-                            center_zh_tilt, zh,
+                            path,
+                            zh_tilt, zh,
                             z,
                             p_lev_copy->v(), p_lay_copy->v());
     p_lay_copy->expand_dims({n_col, n_z_in});
     p_lev_copy->expand_dims({n_col, n_zh_in});
-    compress_columns_p_or_t(n_col_x, n_col_y, n_z_in, n_z_tilt,
-                            center_path,
-                            center_zh_tilt, zh,
-                            z,
-                            t_lev_copy->v(), t_lay_copy->v());
-    t_lay_copy->expand_dims({n_col, n_z_in});
-    t_lev_copy->expand_dims({n_col, n_zh_in});
-
 }
 
 void create_tilted_columns(const int n_x, const int n_y, const int n_lay_in, const int n_lev_in,
@@ -656,38 +622,6 @@ void interpolate(const int n_x, const int n_y, const int n_lay_in, const int n_l
                  const Float zp, const ijk offset,
                  Float* p_out)
 {
-    int zp_in_zh = -1; // half level
-    int zp_in_zf = -1; // full level
-    // MT: the 1e-2 here seems a remnant from when the tilted path did not included steps smaller than 2 cm.
-    // currently, using this assumption here creates the need for pressure check after the call to this interpolate function
-    for (int ilev=0; ilev<n_lev_in; ++ilev)
-        if (std::abs(zh_in[ilev]-zp) < 1e-2)
-            zp_in_zh= ilev;
-    for (int ilay=0; ilay<n_lay_in; ++ilay)
-        if (std::abs(zf_in[ilay]-zp) < 1e-2)
-            zp_in_zf = ilay;
-    if (zp_in_zh > -1)
-    {
-        for (int iy=0; iy<n_y; ++iy)
-            for (int ix=0; ix<n_x; ++ix)
-            {
-                const int idx_out  = ix + iy*n_y;
-                const int idx_in = (ix + offset.i)%n_x + (iy+offset.j)%n_y * n_x + zp_in_zh*n_y*n_x;
-                p_out[idx_out] = plev_in[idx_in];
-            } 
-    }
-    else if (zp_in_zf > -1)
-    {
-        for (int iy=0; iy<n_y; ++iy)
-            for (int ix=0; ix<n_x; ++ix)
-            {
-                const int idx_out  = ix + iy*n_y;
-                const int idx_in = (ix + offset.i)%n_x + (iy+offset.j)%n_y * n_x + zp_in_zf*n_y*n_x;
-                p_out[idx_out] = play_in[idx_in];
-            } 
-    }
-    else
-    {
         int posh_bot = 0;
         int posf_bot = 0;
         for (int ilev=0; ilev<n_lev_in-1; ++ilev)
@@ -706,25 +640,45 @@ void interpolate(const int n_x, const int n_y, const int n_lay_in, const int n_l
         const int zf_top = (posf_bot+1 < n_lay_in) ? zf_in[posf_bot+1] : zh_top+1;
         const int zf_bot = zf_in[posf_bot];
 
-        if (zh_top > zf_top)
+        // tilted layers between the lowest level and layer
+        if (posf_bot == 0 && posh_bot == 0 && zp < zf_in[0])
         {
-            p_top = &play_in.data()[(posf_bot+1)*n_x*n_y];       
-            z_top = zf_in[posf_bot+1];       
-        }
-        else
-        {   
-            p_top = &plev_in.data()[(posh_bot+1)*n_x*n_y];       
-            z_top = zh_in[posh_bot+1];
-        }
-        if (zh_bot < zf_bot)
-        {
-            p_bot = &play_in.data()[(posf_bot)*n_x*n_y];       
-            z_bot = zf_in[posf_bot];       
-        }
-        else
-        {   
-            p_bot = &plev_in.data()[(posh_bot)*n_x*n_y];       
+            p_top = &play_in.data()[(posf_bot)*n_x*n_y];
+            z_top = zf_in[posf_bot];
+            p_bot = &plev_in.data()[(posh_bot)*n_x*n_y];
             z_bot = zh_in[posh_bot];
+        }
+        // tilted layers between the top layer and level
+        else if (posf_bot == n_lay_in - 1 && posh_bot == n_lev_in -2)
+        {
+            p_top = &plev_in.data()[(posh_bot + 1) * n_x * n_y];
+            z_top = zh_in[posh_bot + 1];
+            p_bot = &play_in.data()[(posf_bot) * n_x * n_y];
+            z_bot = zf_in[posf_bot];
+        }
+        // all layers in between
+        else
+        {
+            if (zh_top > zf_top)
+            {
+                p_top = &play_in.data()[(posf_bot + 1) * n_x * n_y];
+                z_top = zf_in[posf_bot + 1];
+            }
+            else
+            {
+                p_top = &plev_in.data()[(posh_bot + 1) * n_x * n_y];
+                z_top = zh_in[posh_bot + 1];
+            }
+            if (zh_bot < zf_bot)
+            {
+                p_bot = &play_in.data()[(posf_bot) * n_x * n_y];
+                z_bot = zf_in[posf_bot];
+            }
+            else
+            {
+                p_bot = &plev_in.data()[(posh_bot) * n_x * n_y];
+                z_bot = zh_in[posh_bot];
+            }
         }
 
         Float dz = z_top-z_bot;
@@ -736,9 +690,7 @@ void interpolate(const int n_x, const int n_y, const int n_lay_in, const int n_l
                 const int idx_in = (ix + offset.i)%n_x + (iy+offset.j)%n_y * n_x;
                 const Float pres = (zp-z_bot)/dz*p_top[idx_in] + (z_top-zp)/dz*p_bot[idx_in];
                 p_out[idx_out] = pres;
-            } 
-
-    }
+            }
 }
 
 
@@ -814,21 +766,13 @@ void tica_tilt(
     int n_zh_tilt_center = center_zh_tilt.v().size();
     int n_z_tilt_center = n_zh_tilt_center - 1;
 
-    tilt_fields(n_z_in, n_zh_in, n_col_x, n_col_y,
+    tilt_and_compress_fields(n_z_in, n_zh_in, n_col_x, n_col_y,
                 n_z_tilt_center, n_zh_tilt_center, n_col,
                 zh, z,
                 center_zh_tilt, center_path,
                 &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out, &rh_out,
                 gas_concs_out, gas_names, aerosol_concs_out, aerosol_names, switch_aerosol_optics
     );
-
-    // compress tilted column layers to original layers
-    compress_fields(n_col_x, n_col_y,
-                    n_z_in, n_zh_in, n_z_tilt_center,
-                    center_path,
-                    center_zh_tilt, zh, z,
-                    &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out, &rh_out,
-                    gas_concs_out, gas_names, aerosol_concs_out, aerosol_names, switch_aerosol_optics);
 
     ////// SETUP FOR RANDOM START POINT TILTING //////
     if (switch_cloud_optics)
