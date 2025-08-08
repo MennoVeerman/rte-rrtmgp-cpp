@@ -300,6 +300,12 @@ void solve_radiation(int argc, char** argv)
         switch_independent_column = true;
     }
 
+    if (switch_tica && switch_single_gpt)
+    {
+        std::string error = "Output g-point fluxes not supported for tilted columns";
+        throw std::runtime_error(error);
+    }
+
     if (switch_cloud_mie && switch_ice_cloud_optics)
     {
         std::string error = "Thou shall not use mie tables as long as ice optics are enabled";
@@ -454,20 +460,28 @@ void solve_radiation(int argc, char** argv)
 
     Float tica_sza;
     Float tica_azi;
+    Array<ijk,1> center_path;
+    Array<Float,1> center_zh_tilt;
+    Array<Float,1> zh;
 
     mu0 = input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x});
     azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
 
     bool do_tilting = true;
+    if (mu0.v()[0] < 0.087)     // mu0 = 0.087 roughly corresponds to a sza of 85 degrees
+        do_tilting = false;
+
     if (switch_tica)
     {
+        cudaDeviceSynchronize();
+        cudaEvent_t start;
+        cudaEvent_t stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+        cudaEventRecord(start, 0);
+
         tica_sza = acos(mu0.v()[0]);
         tica_azi = azi.v()[0];
-        for (int icol=1; icol<=n_col; ++icol)
-        {
-            mu0({icol}) = 1.0;
-            azi({icol}) = 0.0;
-        }    
 
         std::vector<std::string> gas_names = {
             "h2o", "co2", "o3", "n2o", "co", "ch4", "o2", "n2", "ccl4", "cfc11", 
@@ -506,12 +520,8 @@ void solve_radiation(int argc, char** argv)
         z.set_dims({n_z_in});
         z = std::move(input_nc.get_variable<Float>("z", {n_z_in}));
 
-        Array<ijk,1> center_path;
-        Array<Float,1> center_zh_tilt;
         tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
         int n_z_tilt_center = center_zh_tilt.v().size() - 1;
-
-        std::cout<<n_z_tilt_center<<std::endl;
 
         if (do_tilting)
         {
@@ -600,6 +610,16 @@ void solve_radiation(int argc, char** argv)
             gas_concs = gas_concs_out;
 
             Status::print_message("tilted path created");
+            cudaEventRecord(stop, 0);
+            cudaEventSynchronize(stop);
+            float duration = 0.f;
+            cudaEventElapsedTime(&duration, start, stop);
+
+            cudaEventDestroy(start);
+            cudaEventDestroy(stop);
+
+            Status::print_message("Duration tilting: " + std::to_string(duration) + " (ms)");
+            Status::print_message("number of levels in tilted column: " + std::to_string(n_z_tilt_center));
         }
     }
 
@@ -1081,6 +1101,32 @@ void solve_radiation(int argc, char** argv)
         Array<Float,2> rt_flux_sfc_up_cpu(rt_flux_sfc_up);
         Array<Float,3> rt_flux_abs_dir_cpu(rt_flux_abs_dir);
         Array<Float,3> rt_flux_abs_dif_cpu(rt_flux_abs_dif);
+
+//        if (switch_tica)
+//        {
+//            // tilt back results or homogenize in case of high sza (> 85 degrees)
+//            if (do_tilting)
+//            {
+//                // sw_flux_dn
+//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
+//
+//                // sw_flux_dn_dir
+//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
+//
+//                // sw_flux_up
+//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
+//
+//                // sw_flux_net
+//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
+//            }
+//            else
+//            {
+//                tica_mean(sw_flux_dn_cpu, n_col_x, n_col_y, n_lev);
+//                tica_mean(sw_flux_dn_dir_cpu, n_col_x, n_col_y, n_lev);
+//                tica_mean(sw_flux_up_cpu, n_col_x, n_col_y, n_lev);
+//                tica_mean(sw_flux_net_cpu, n_col_x, n_col_y, n_lev);
+//            }
+//        }
 
         output_nc.add_dimension("gpt_sw", n_gpt_sw);
         output_nc.add_dimension("band_sw", n_bnd_sw);

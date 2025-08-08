@@ -129,3 +129,5 @@ void tica_tilt(const Float sza, const Float azi,
 void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
                       const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
                       const std::vector<ijk>& tilted_path, Array<Float,2>& flux);
+
+void tica_mean(Array<Float,2> var, const int n_x, const int n_y, const int n_z_in);

@@ -918,19 +918,30 @@ void solve_radiation(int argc, char** argv)
         Array<Float,3> sw_bnd_flux_dn_dir_cpu(sw_bnd_flux_dn_dir);
         Array<Float,3> sw_bnd_flux_net_cpu(sw_bnd_flux_net);
 
-        if (switch_tica && do_tilting)
+        if (switch_tica)
         {
-            // sw_flux_dn
-            translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
+            // tilt back results or homogenize in case of high sza (> 85 degrees)
+            if (do_tilting)
+            {
+                // sw_flux_dn
+                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
 
-            // sw_flux_dn_dir
-            translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
+                // sw_flux_dn_dir
+                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
 
-            // sw_flux_up
-            translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
+                // sw_flux_up
+                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
 
-            // sw_flux_net
-            translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
+                // sw_flux_net
+                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
+            }
+            else
+            {
+                tica_mean(sw_flux_dn_cpu, n_col_x, n_col_y, n_lev);
+                tica_mean(sw_flux_dn_dir_cpu, n_col_x, n_col_y, n_lev);
+                tica_mean(sw_flux_up_cpu, n_col_x, n_col_y, n_lev);
+                tica_mean(sw_flux_net_cpu, n_col_x, n_col_y, n_lev);
+            }
         }
 
         output_nc.add_dimension("gpt_sw", n_gpt_sw);

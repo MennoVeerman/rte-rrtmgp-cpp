@@ -139,11 +139,16 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
         dz_tilted[z_idx] += dz0;
 
         // Record boundary crossing
-        if ((std::abs(l - lx) < epsilon) ||  (std::abs(l - ly) < epsilon) || ( (std::abs(l - lz) < epsilon || zp >= zh[k+1]))){
-            // Create a new path segment after crossing boundary
-            tilted_path.push_back({i, j, k});
-            dz_tilted.push_back(0.0);
-            z_idx += 1;
+        // if path is larger than 1 cm
+        if (l > min_step)
+        {
+            if ((std::abs(l - lx) < epsilon) || (std::abs(l - ly) < epsilon) ||
+                ((std::abs(l - lz) < epsilon || zp >= zh[k + 1]))) {
+                // Create a new path segment after crossing boundary
+                tilted_path.push_back({i, j, k});
+                dz_tilted.push_back(0.0);
+                z_idx += 1;
+            }
         }
 
         // Check z boundary crossing
@@ -1035,3 +1040,35 @@ void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
 
     flux = std::move(flux_tmp);
 }
+
+
+void tica_mean(Array<Float,2> var, const int n_x, const int n_y, const int n_z_in)
+{
+    const int n_col = n_x * n_y;
+    for (int k = 0; k < n_z_in; ++k) {
+        // calc mean
+        double tmp = 0.;
+        double mean;
+        for (int iy = 0; iy < n_y; ++iy)
+        {
+            for (int ix = 0; ix < n_x; ++ix)
+            {
+                const int idx = ix + iy * n_x + k * n_y * n_x;
+                tmp += var.ptr()[idx];
+            }
+            mean = tmp / n_col;
+        }
+
+        // fill field with mean
+        for (int iy = 0; iy < n_y; ++iy)
+        {
+            for (int ix = 0; ix < n_x; ++ix)
+            {
+                const int idx = ix + iy * n_x + k * n_y * n_x;
+                var.ptr()[idx] = mean;
+            }
+        }
+    }
+}
+
+
