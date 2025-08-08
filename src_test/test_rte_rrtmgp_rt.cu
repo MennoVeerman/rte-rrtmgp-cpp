@@ -507,7 +507,6 @@ void solve_radiation(int argc, char** argv)
         
         Array<Float,1> xh;
         Array<Float,1> yh;
-        Array<Float,1> zh;
         Array<Float,1> z;
 
         xh.set_dims({n_col_x+1});
@@ -1102,31 +1101,31 @@ void solve_radiation(int argc, char** argv)
         Array<Float,3> rt_flux_abs_dir_cpu(rt_flux_abs_dir);
         Array<Float,3> rt_flux_abs_dif_cpu(rt_flux_abs_dif);
 
-//        if (switch_tica)
-//        {
-//            // tilt back results or homogenize in case of high sza (> 85 degrees)
-//            if (do_tilting)
-//            {
-//                // sw_flux_dn
-//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
-//
-//                // sw_flux_dn_dir
-//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
-//
-//                // sw_flux_up
-//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
-//
-//                // sw_flux_net
-//                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
-//            }
-//            else
-//            {
-//                tica_mean(sw_flux_dn_cpu, n_col_x, n_col_y, n_lev);
-//                tica_mean(sw_flux_dn_dir_cpu, n_col_x, n_col_y, n_lev);
-//                tica_mean(sw_flux_up_cpu, n_col_x, n_col_y, n_lev);
-//                tica_mean(sw_flux_net_cpu, n_col_x, n_col_y, n_lev);
-//            }
-//        }
+        if (switch_tica)
+        {
+            // tilt back results or homogenize in case of high sza (> 85 degrees)
+            if (do_tilting)
+            {
+                // sw_flux_dn
+                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
+
+                // sw_flux_dn_dir
+                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
+
+                // sw_flux_up
+                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
+
+                // sw_flux_net
+                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
+            }
+            else
+            {
+                tica_mean(sw_flux_dn_cpu, n_col_x, n_col_y, n_lev);
+                tica_mean(sw_flux_dn_dir_cpu, n_col_x, n_col_y, n_lev);
+                tica_mean(sw_flux_up_cpu, n_col_x, n_col_y, n_lev);
+                tica_mean(sw_flux_net_cpu, n_col_x, n_col_y, n_lev);
+            }
+        }
 
         output_nc.add_dimension("gpt_sw", n_gpt_sw);
         output_nc.add_dimension("band_sw", n_bnd_sw);

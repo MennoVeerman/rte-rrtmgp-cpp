@@ -421,41 +421,24 @@ void compress_columns_p_or_t(const int n_x, const int n_y,
 
     // temperature and pressure at original levels can be taken directly from the same height in the tilted column
     #pragma omp parallel for
-    for (int ilev = 0; ilev < n_out_lay; ++ilev)
+    for (int ilev = 0; ilev < n_out_lay + 1; ++ilev)
     {
         for (int iy = 0; iy < n_y; ++iy)
         {
             for (int ix = 0; ix < n_x; ++ix)
             {
-                int num_inputs = 0;
                 for (int ilev_tilt = 0; ilev_tilt < (n_tilt + 1); ++ilev_tilt)
                 {
-                    const ijk offset = tilted_path_v[ilev_tilt];
-                    if (offset.k == ilev && num_inputs == 0)
+                    if (std::abs(zh.v()[ilev] - zh_tilt.v()[ilev_tilt]) < 1e-2)  // minimum step size
                     {
                         const int out_idx = ix + iy * n_x + ilev * n_x * n_y;
                         const int in_idx = ix + iy * n_x + ilev_tilt * n_x * n_y;
                         var_tmp_lev[out_idx] = var_lev[in_idx];
-                        num_inputs += 1;
                     }
                 }
             }
         }
     }
-
-    // determine pressure at the top separately as the tilted path (and offset) are at the layers
-    int ilev = n_out_lay;
-    int ilev_tilt = n_tilt;
-    for (int iy = 0; iy < n_y; ++iy)
-    {
-        for (int ix = 0; ix < n_x; ++ix)
-        {
-            const int out_idx = ix + iy * n_x + ilev * n_x * n_y;
-            const int in_idx = ix + iy * n_x + ilev_tilt * n_x * n_y;
-            var_tmp_lev[out_idx] = var_lev[in_idx];
-        }
-    }
-
 
     // height of layer center differs between the original column and the tilted column, so we interpolate between the levels
     // weighted interpolation based on z, as in the interpolation function
@@ -771,6 +754,9 @@ void tica_tilt(
     int n_zh_tilt_center = center_zh_tilt.v().size();
     int n_z_tilt_center = n_zh_tilt_center - 1;
 
+    center_path.set_dims({n_z_tilt_center});
+    center_zh_tilt.set_dims({n_zh_tilt_center});
+
     tilt_and_compress_fields(n_z_in, n_zh_in, n_col_x, n_col_y,
                 n_z_tilt_center, n_zh_tilt_center, n_col,
                 zh, z,
@@ -1011,7 +997,7 @@ void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
     {
         for (int k=0; k<zh_tilt.v().size(); ++k)
         {
-            if (zh_tilt.v()[k] == zh.v()[ilev])
+            if (std::abs(zh_tilt.v()[k] - zh.v()[ilev]) < 1e-2)
             {
                 const ijk offset = tilted_path[k];
                 for (int iy = 0; iy < n_y; ++iy)
