@@ -1004,7 +1004,9 @@ void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
                     for (int ix = 0; ix < n_x; ++ix)
                     {
                         const int idx_out = ix + iy * n_x + ilev * n_y * n_x;
-                        const int idx_in = (ix - offset.i) % n_x + (iy - offset.j) % n_y * n_x + ilev * n_y * n_x;
+                        const int modulo_x = ix - offset.i < 0 ? (ix - offset.i)% n_x + n_x: (ix - offset.i)% n_x;
+                        const int modulo_y = iy - offset.j < 0 ? (iy - offset.j)% n_y + n_y: (iy - offset.j)% n_y;
+                        const int idx_in = modulo_x + modulo_y * n_x + ilev * n_y * n_x;
                         flux_tmp[idx_out] = flux.ptr()[idx_in];
                     }
             }
@@ -1019,7 +1021,9 @@ void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
             for (int ix = 0; ix < n_x; ++ix)
             {
                 const int idx_out = ix + iy * n_x + ilev * n_y * n_x;
-                const int idx_in = (ix - offset_tod.i) % n_x + (iy - offset_tod.j) % n_y * n_x + ilev * n_y * n_x;
+                const int modulo_x = ix - offset_tod.i < 0 ? (ix - offset_tod.i)% n_x + n_x: (ix - offset_tod.i)% n_x;
+                const int modulo_y = iy - offset_tod.j < 0 ? (iy - offset_tod.j)% n_y + n_y: (iy - offset_tod.j)% n_y;
+                const int idx_in = modulo_x + modulo_y * n_x + ilev * n_y * n_x;
                 flux_tmp[idx_out] = flux.ptr()[idx_in];
             }
     }
@@ -1027,8 +1031,59 @@ void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
     flux = std::move(flux_tmp);
 }
 
+void translate_heating(const int n_x, const int n_y, const int n_z,
+                      const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
+                      const std::vector<ijk>& tilted_path, Array<Float,3>& flux)
+{
+    std::vector<Float> heat_tmp(n_z*n_x*n_y, Float(0.));
 
-void tica_mean(Array<Float,2> var, const int n_x, const int n_y, const int n_z_in)
+    const int idx_top = zh.v().size() -1;   // -1 as zh is one longer than z (at which tilted path is defined)
+    for (int ilay=0; ilay<idx_top; ++ilay)
+    {
+        for (int k=0; k<zh_tilt.v().size(); ++k)
+        {
+            if (std::abs(zh_tilt.v()[k] - zh.v()[ilay]) < 1e-2)
+            {
+                const ijk offset = tilted_path[k];
+                for (int iy = 0; iy < n_y; ++iy)
+                    for (int ix = 0; ix < n_x; ++ix)
+                    {
+                        const int idx_out = ix + iy * n_x + ilay * n_y * n_x;
+                        const int modulo_x = ix - offset.i < 0 ? (ix - offset.i)% n_x + n_x: (ix - offset.i)% n_x;
+                        const int modulo_y = iy - offset.j < 0 ? (iy - offset.j)% n_y + n_y: (iy - offset.j)% n_y;
+                        const int idx_in = modulo_x + modulo_y * n_x + ilay * n_y * n_x;
+                        heat_tmp[idx_out] = flux.ptr()[idx_in];
+                    }
+            }
+        }
+    }
+
+    flux = std::move(heat_tmp);
+}
+
+void translate_top(const int n_x, const int n_y,
+                       const Array<Float,1>& zh_tilt,
+                       const std::vector<ijk>& tilted_path, Array<Float,2>& flux)
+{
+    std::vector<Float> heat_tmp(n_x*n_y, Float(0.));
+
+    const int idx_top_tilt = zh_tilt.v().size()-2;       // -2: -1 for index starting at zero and -1 as zh is one longer than z
+    const ijk offset_tod = tilted_path[idx_top_tilt];
+
+    for (int iy = 0; iy < n_y; ++iy)
+        for (int ix = 0; ix < n_x; ++ix)
+        {
+            const int idx_out = ix + iy * n_x;
+            const int modulo_x = ix - offset_tod.i < 0 ? (ix - offset_tod.i)% n_x + n_x: (ix - offset_tod.i)% n_x;
+            const int modulo_y = iy - offset_tod.j < 0 ? (iy - offset_tod.j)% n_y + n_y: (iy - offset_tod.j)% n_y;
+            const int idx_in = modulo_x + modulo_y * n_x;
+            heat_tmp[idx_out] = flux.ptr()[idx_in];
+        }
+
+    flux = std::move(heat_tmp);
+}
+
+void tica_mean(Array<Float,2>& var, const int n_x, const int n_y, const int n_z_in)
 {
     const int n_col = n_x * n_y;
     for (int k = 0; k < n_z_in; ++k) {
@@ -1042,8 +1097,8 @@ void tica_mean(Array<Float,2> var, const int n_x, const int n_y, const int n_z_i
                 const int idx = ix + iy * n_x + k * n_y * n_x;
                 tmp += var.ptr()[idx];
             }
-            mean = tmp / n_col;
         }
+        mean = tmp / n_col;
 
         // fill field with mean
         for (int iy = 0; iy < n_y; ++iy)
@@ -1057,4 +1112,31 @@ void tica_mean(Array<Float,2> var, const int n_x, const int n_y, const int n_z_i
     }
 }
 
+void tica_mean(Array<Float,3>& var, const int n_x, const int n_y, const int n_z_in)
+{
+    const int n_col = n_x * n_y;
+    for (int k = 0; k < n_z_in; ++k) {
+        // calc mean
+        double tmp = 0.;
+        double mean;
+        for (int iy = 0; iy < n_y; ++iy)
+        {
+            for (int ix = 0; ix < n_x; ++ix)
+            {
+                const int idx = ix + iy * n_x + k * n_y * n_x;
+                tmp += var.ptr()[idx];
+            }
+        }
+        mean = tmp / n_col;
 
+        // fill field with mean
+        for (int iy = 0; iy < n_y; ++iy)
+        {
+            for (int ix = 0; ix < n_x; ++ix)
+            {
+                const int idx = ix + iy * n_x + k * n_y * n_x;
+                var.ptr()[idx] = mean;
+            }
+        }
+    }
+}

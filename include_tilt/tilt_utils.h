@@ -90,13 +90,6 @@ void tilt_and_compress_fields(const int n_z_in, const int n_zh_in, const int n_c
     Aerosol_concs& aerosol_concs_copy, const std::vector<std::string>& aerosol_names, const bool switch_aerosol_optics
     );
 
-void compress_fields(const int compress_lay_start_idx, const int n_col_x, const int n_col_y,
-    const int n_z_in, const int n_zh_in,  const int n_z_tilt,
-    Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy, 
-    Array<Float,2>* rh_copy, 
-    Gas_concs& gas_concs_copy, std::vector<std::string> gas_names,
-    Aerosol_concs& aerosol_concs_copy, std::vector<std::string> aerosol_names, const bool switch_aerosol_optics);
-
 void create_tilted_columns(const int n_x, const int n_y, const int n_lay_in, const int n_lev_in,
                            const std::vector<Float>& zh_tilted, const std::vector<ijk>& tilted_path,
                            std::vector<Float>& var);
@@ -130,4 +123,13 @@ void translate_fluxes(const int n_x, const int n_y, const int n_lev_in,
                       const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
                       const std::vector<ijk>& tilted_path, Array<Float,2>& flux);
 
-void tica_mean(Array<Float,2> var, const int n_x, const int n_y, const int n_z_in);
+void translate_heating(const int n_x, const int n_y, const int n_z,
+                      const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
+                      const std::vector<ijk>& tilted_path, Array<Float,3>& flux);
+
+void translate_top(const int n_x, const int n_y,
+                       const Array<Float,1>& zh_tilt,
+                       const std::vector<ijk>& tilted_path, Array<Float,2>& flux);
+
+void tica_mean(Array<Float,2>& var, const int n_x, const int n_y, const int n_z_in);
+void tica_mean(Array<Float,3>& var, const int n_x, const int n_y, const int n_z_in);

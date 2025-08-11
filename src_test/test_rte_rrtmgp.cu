@@ -243,9 +243,6 @@ void solve_radiation(int argc, char** argv)
         switch_ice_cloud_optics = false;
     }
 
-    if (switch_tica)
-        Status::print_message("Using TICA creates upto 4 times more vertical levels that should fit in memory");
-
     if (switch_longwave && switch_tica)
     {
         std::string error = "Combi of longwave radiation and tilted columns is not tested";
@@ -368,7 +365,15 @@ void solve_radiation(int argc, char** argv)
         read_and_set_aer("aermr11", n_col_x, n_col_y, n_lay, input_nc, aerosol_concs);
     }
 
-    bool do_tilting = true;
+    Array<Float,1> mu0({n_col});
+    Array<Float,1> azi({n_col});
+    mu0 = input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x});
+    azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
+
+    bool do_tilting = false;
+    if (switch_tica && mu0.v()[0] > 0.087)     // mu0 = 0.087 roughly corresponds to a sza of 85 degrees
+        do_tilting = true;
+
     Float tica_sza;
     Float tica_azi;
 
@@ -376,16 +381,16 @@ void solve_radiation(int argc, char** argv)
     Array<Float,1> center_zh_tilt;
     Array<Float,1> zh;
 
-    if (switch_tica)
+    if (do_tilting)
     {
-        Array<Float,1> mu0({n_col});
-        Array<Float,1> azi({n_col});
-
-        mu0 = input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x});
-        azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
+        cudaDeviceSynchronize();
+        cudaEvent_t start;
+        cudaEvent_t stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+        cudaEventRecord(start, 0);
 
         // define arrays
-
         const int n_z_in = input_nc.get_dimension_size("z");
         const int n_zh_in = input_nc.get_dimension_size("zh");
 
@@ -409,98 +414,104 @@ void solve_radiation(int argc, char** argv)
         tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
         int n_z_tilt_center = center_zh_tilt.v().size() - 1;
 
-        if (n_z_tilt_center > 4 * n_lay)
-            do_tilting = false;
-
-        if (do_tilting)
-        {
-            for (int icol = 1; icol <= n_col; ++icol) {
-                mu0({icol}) = 1.0;
-                azi({icol}) = 0.0;
-            }
-
-            std::vector<std::string> gas_names = {
-                    "h2o", "co2", "o3", "n2o", "co", "ch4", "o2", "n2", "ccl4", "cfc11",
-                    "cfc12", "cfc22", "hfc143a", "hfc125", "hfc23", "hfc32", "hfc134a",
-                    "cf4", "no2"
-            };
-            std::vector<std::string> aerosol_names = {
-                    "aermr01", "aermr02", "aermr03", "aermr04", "aermr05", "aermr06", "aermr07",
-                    "aermr08", "aermr09", "aermr10", "aermr11"
-            };
-
-            for (const auto &aerosol_name: aerosol_names) {
-                if (!aerosol_concs.exists(aerosol_name)) {
-                    continue;
-                }
-                const Array<Float, 2> &gas = aerosol_concs.get_vmr(aerosol_name);
-                if (gas.size() > 1) {
-                    if (gas.get_dims()[0] == 1) {
-                        aerosol_concs.set_vmr(aerosol_name,
-                                              aerosol_concs.get_vmr(aerosol_name).subset({{{1, n_col}, {1, n_lay}}}));
-                    }
-                }
-            }
-
-            Array<Float, 2> t_lay_out = t_lay;
-            Array<Float, 2> t_lev_out = t_lev;
-            Array<Float, 2> p_lay_out = p_lay;
-            Array<Float, 2> p_lev_out = p_lev;
-            Gas_concs gas_concs_out = gas_concs;
-            Aerosol_concs aerosol_concs_out = aerosol_concs;
-            Array<Float, 2> rh_out = rh;
-
-            Array<Float,2> lwp_out;
-            lwp_out.set_dims({n_col, n_z_in});
-            Array<Float,2> rel_out;
-            rel_out.set_dims({n_col, n_z_in});
-            Array<Float,2> iwp_out;
-            iwp_out.set_dims({n_col, n_z_in});
-            Array<Float,2> dei_out;
-            dei_out.set_dims({n_col, n_z_in});
-
-            tica_tilt(
-                    tica_sza, tica_azi,
-                    n_col_x, n_col_y, n_col,
-                    n_lay, n_lev, n_z_in, n_zh_in,
-                    xh, yh, zh, z,
-                    p_lay, t_lay, p_lev, t_lev,
-                    lwp, iwp, rel, dei, rh,
-                    gas_concs, aerosol_concs,
-                    p_lay_out, t_lay_out, p_lev_out, t_lev_out,
-                    lwp_out, iwp_out, rel_out, dei_out, rh_out,
-                    gas_concs_out, aerosol_concs_out,
-                    gas_names, aerosol_names,
-                    switch_cloud_optics, switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics,
-                    rnd_seed
-            );
-
-            lwp_out.expand_dims({n_col, n_lay});
-            rel_out.expand_dims({n_col, n_lay});
-            iwp_out.expand_dims({n_col, n_lay});
-            dei_out.expand_dims({n_col, n_lay});
-
-            if (switch_aerosol_optics)
-            {
-                rh_out.expand_dims({n_col, n_lay});
-                rh  = rh_out;
-                aerosol_concs = aerosol_concs_out;
-            }
-
-            lwp = lwp_out;
-            rel = rel_out;
-            iwp = iwp_out;
-            dei = dei_out;
-
-            p_lay = p_lay_out;
-            p_lev = p_lev_out;
-            t_lay = t_lay_out;
-            t_lev = t_lev_out;
-
-            gas_concs = gas_concs_out;
-
-            Status::print_message("tilted path created");
+        for (int icol = 1; icol <= n_col; ++icol) {
+            mu0({icol}) = 1.0;
+            azi({icol}) = 0.0;
         }
+
+        std::vector<std::string> gas_names = {
+                "h2o", "co2", "o3", "n2o", "co", "ch4", "o2", "n2", "ccl4", "cfc11",
+                "cfc12", "cfc22", "hfc143a", "hfc125", "hfc23", "hfc32", "hfc134a",
+                "cf4", "no2"
+        };
+        std::vector<std::string> aerosol_names = {
+                "aermr01", "aermr02", "aermr03", "aermr04", "aermr05", "aermr06", "aermr07",
+                "aermr08", "aermr09", "aermr10", "aermr11"
+        };
+
+        for (const auto &aerosol_name: aerosol_names) {
+            if (!aerosol_concs.exists(aerosol_name)) {
+                continue;
+            }
+            const Array<Float, 2> &gas = aerosol_concs.get_vmr(aerosol_name);
+            if (gas.size() > 1) {
+                if (gas.get_dims()[0] == 1) {
+                    aerosol_concs.set_vmr(aerosol_name,
+                                          aerosol_concs.get_vmr(aerosol_name).subset({{{1, n_col}, {1, n_lay}}}));
+                }
+            }
+        }
+
+        Array<Float, 2> t_lay_out = t_lay;
+        Array<Float, 2> t_lev_out = t_lev;
+        Array<Float, 2> p_lay_out = p_lay;
+        Array<Float, 2> p_lev_out = p_lev;
+        Gas_concs gas_concs_out = gas_concs;
+        Aerosol_concs aerosol_concs_out = aerosol_concs;
+        Array<Float, 2> rh_out = rh;
+
+        Array<Float,2> lwp_out;
+        lwp_out.set_dims({n_col, n_z_in});
+        Array<Float,2> rel_out;
+        rel_out.set_dims({n_col, n_z_in});
+        Array<Float,2> iwp_out;
+        iwp_out.set_dims({n_col, n_z_in});
+        Array<Float,2> dei_out;
+        dei_out.set_dims({n_col, n_z_in});
+
+        tica_tilt(
+                tica_sza, tica_azi,
+                n_col_x, n_col_y, n_col,
+                n_lay, n_lev, n_z_in, n_zh_in,
+                xh, yh, zh, z,
+                p_lay, t_lay, p_lev, t_lev,
+                lwp, iwp, rel, dei, rh,
+                gas_concs, aerosol_concs,
+                p_lay_out, t_lay_out, p_lev_out, t_lev_out,
+                lwp_out, iwp_out, rel_out, dei_out, rh_out,
+                gas_concs_out, aerosol_concs_out,
+                gas_names, aerosol_names,
+                switch_cloud_optics, switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics,
+                rnd_seed
+        );
+
+        lwp_out.expand_dims({n_col, n_lay});
+        rel_out.expand_dims({n_col, n_lay});
+        iwp_out.expand_dims({n_col, n_lay});
+        dei_out.expand_dims({n_col, n_lay});
+
+        if (switch_aerosol_optics)
+        {
+            rh_out.expand_dims({n_col, n_lay});
+            rh  = rh_out;
+            aerosol_concs = aerosol_concs_out;
+        }
+
+        lwp = lwp_out;
+        rel = rel_out;
+        iwp = iwp_out;
+        dei = dei_out;
+
+        p_lay = p_lay_out;
+        p_lev = p_lev_out;
+        t_lay = t_lay_out;
+        t_lev = t_lev_out;
+
+        gas_concs = gas_concs_out;
+
+        Status::print_message("tilted path created");
+        Status::print_message("tilted path created");
+        cudaEventRecord(stop, 0);
+        cudaEventSynchronize(stop);
+        float duration = 0.f;
+        cudaEventElapsedTime(&duration, start, stop);
+
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+
+        Status::print_message("Duration tilting: " + std::to_string(duration) + " (ms)");
+        Status::print_message("number of levels in tilted column: " + std::to_string(n_z_tilt_center));
+
     }
 
     ////// CREATE THE OUTPUT FILE //////
@@ -760,7 +771,7 @@ void solve_radiation(int argc, char** argv)
         }
 
         Array<Float,1> tica_scaling({n_col});
-        if (switch_tica && do_tilting)
+        if (do_tilting)
         {
             for (int icol=1; icol<=n_col; ++icol)
             {
@@ -844,12 +855,6 @@ void solve_radiation(int argc, char** argv)
 
             cudaEventRecord(start, 0);
 
-            bool sw_do_tica;
-            if (switch_tica && do_tilting)
-                sw_do_tica = true;
-            else
-                sw_do_tica = false;
-
             rad_sw.solve_gpu(
                     switch_fluxes,
                     switch_cloud_optics,
@@ -858,7 +863,7 @@ void solve_radiation(int argc, char** argv)
                     switch_output_bnd_fluxes,
                     switch_delta_cloud,
                     switch_delta_aerosol,
-                    sw_do_tica,
+                    do_tilting,
                     gas_concs_gpu,
                     p_lay_gpu, p_lev_gpu,
                     t_lay_gpu, t_lev_gpu,
