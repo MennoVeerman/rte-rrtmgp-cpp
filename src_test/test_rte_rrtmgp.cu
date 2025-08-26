@@ -459,7 +459,7 @@ void solve_radiation(int argc, char** argv)
         Array<Float,2> dei_out;
         dei_out.set_dims({n_col, n_z_in});
 
-        tica_tilt(
+        tica_tilt_simple(
                 tica_sza, tica_azi,
                 n_col_x, n_col_y, n_col,
                 n_lay, n_lev, n_z_in, n_zh_in,

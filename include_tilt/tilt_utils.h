@@ -133,3 +133,48 @@ void translate_top(const int n_x, const int n_y,
 
 void tica_mean(Array<Float,2>& var, const int n_x, const int n_y, const int n_z_in);
 void tica_mean(Array<Float,3>& var, const int n_x, const int n_y, const int n_z_in);
+
+
+/// simplified functions
+void create_tilted_columns_simple(const int n_x, const int n_y, const std::vector<ijk>& tilted_path,
+                                  std::vector<Float>& var);
+
+void compress_columns_weighted_avg_simple(const int n_x, const int n_y,
+                                          const int n_out,
+                                          const int n_tilt,
+                                          const Array<ijk,1>& path,
+                                          std::vector<Float>& var, const std::vector<Float>& zh);
+
+void create_tilted_columns_clouds_simple(const int n_x, const int n_y, const std::vector<ijk>& tilted_path,
+                                         std::vector<Float>& water_path, std::vector<Float>& effective_size,
+                                         const std::vector<Float>& zh);
+
+void compress_columns_weighted_avg_clouds_simple(const int n_x, const int n_y,
+                                                 const int n_out,
+                                                 const int n_tilt,
+                                                 const Array<ijk,1>& path,
+                                                 std::vector<Float>& water_path,
+                                                 std::vector<Float>& effective_size,
+                                                 const std::vector<Float>& dz_tilt);
+
+void translate_levels(const int n_x, const int n_y, const int n_zh,
+                      const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
+                      const std::vector<ijk>& tilted_path, Array<Float,2>& flux, const bool forward);
+
+void translate_layers(const int n_x, const int n_y, const int n_z,
+                      const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
+                      const std::vector<ijk>& tilted_path, Array<Float,2>& flux, const bool forward);
+
+void tica_tilt_simple(const Float sza, const Float azi,
+                          const int n_col_x, const int n_col_y, const int n_col,
+                          const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in ,
+                          Array<Float,1> xh, Array<Float,1> yh, Array<Float,1> zh, Array<Float,1> z,
+                          Array<Float,2> p_lay, Array<Float,2> t_lay, Array<Float,2> p_lev, Array<Float,2> t_lev,
+                          Array<Float,2> lwp, Array<Float,2> iwp, Array<Float,2> rel, Array<Float,2> dei, Array<Float,2> rh,
+                          Gas_concs gas_concs, Aerosol_concs aerosol_concs,
+                          Array<Float,2>& p_lay_out, Array<Float,2>& t_lay_out, Array<Float,2>& p_lev_out, Array<Float,2>& t_lev_out,
+                          Array<Float,2>& lwp_out, Array<Float,2>& iwp_out, Array<Float,2>& rel_out, Array<Float,2>& dei_out, Array<Float,2>& rh_out,
+                          Gas_concs& gas_concs_out, Aerosol_concs& aerosol_concs_out,
+                          std::vector<std::string>& gas_names, std::vector<std::string>& aerosol_names,
+                          bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
+                          int rnd_seed);

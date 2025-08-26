@@ -1140,3 +1140,380 @@ void tica_mean(Array<Float,3>& var, const int n_x, const int n_y, const int n_z_
         }
     }
 }
+
+//////////////////
+// below this point are the same functions again, now simplified, therefore less accurate
+void create_tilted_columns_simple(const int n_x, const int n_y, const std::vector<ijk>& tilted_path,
+                           std::vector<Float>& var)
+{
+    const int n_lay = tilted_path.size();
+
+    std::vector<Float> var_tmp(n_lay*n_x*n_y);
+
+#pragma omp parallel for
+    for (int ilay=0; ilay<n_lay; ++ilay)
+    {
+        const ijk offset = tilted_path[ilay];
+        for (int iy=0; iy<n_y; ++iy)
+            for (int ix=0; ix<n_x; ++ix)
+            {
+                const int idx_out  = ix + iy*n_y + ilay*n_y*n_x;
+                const int idx_in = (ix + offset.i)%n_x + (iy+offset.j)%n_y * n_x + offset.k*n_y*n_x;
+                var_tmp[idx_out] = var[idx_in];
+            }
+    }
+
+    var.resize(var_tmp.size());
+    var = var_tmp;
+}
+
+void compress_columns_weighted_avg_simple(const int n_x, const int n_y,
+                                   const int n_out,
+                                   const int n_tilt,
+                                   const Array<ijk,1>& path,
+                                   std::vector<Float>& var, const std::vector<Float>& zh)
+{
+    std::vector<Float> var_tmp(n_out * n_x * n_y);
+    const std::vector<ijk>& tilted_path_v = path.v();
+
+#pragma omp parallel for
+    for (int ilay = 0; ilay < n_out; ++ ilay)
+    {
+        for (int iy = 0; iy < n_y; ++iy)
+        {
+            for (int ix = 0; ix < n_x; ++ix)
+            {
+                const int out_idx = ix + iy * n_x + ilay * n_x * n_y;
+                Float t_sum = 0.0;
+                Float w_sum = 0.0;
+                Float avg = 0.0;
+                int num_inputs = 0;
+
+                for (int ilay_tilt = 0; ilay_tilt < n_tilt; ++ilay_tilt)
+                {
+                    const ijk offset = tilted_path_v[ilay_tilt];
+                    if (offset.k == ilay)
+                    {
+                        int in_idx = ix + iy * n_x + ilay_tilt * n_x * n_y;
+                        const Float dz_local =  zh[ilay_tilt+1]-zh[ilay_tilt];
+                        t_sum += var[in_idx] * dz_local;
+                        w_sum += dz_local;
+                        avg += var[in_idx];
+                        num_inputs += 1;
+                    }
+                }
+
+                if (w_sum > 1e-6)
+                    var_tmp[out_idx] = t_sum / w_sum;
+                else
+                    var_tmp[out_idx] = avg / num_inputs;
+            }
+        }
+    }
+    var = var_tmp;
+}
+
+void create_tilted_columns_clouds_simple(const int n_x, const int n_y, const std::vector<ijk>& tilted_path,
+                                  std::vector<Float>& water_path, std::vector<Float>& effective_size,
+                                  const std::vector<Float>& zh)
+{
+    const int n_lay = tilted_path.size();
+
+    std::vector<Float> water_path_tmp(n_lay*n_x*n_y);
+    std::vector<Float> effective_size_tmp(n_lay*n_x*n_y);
+
+#pragma omp parallel for
+    for (int ilay=0; ilay<n_lay; ++ilay)
+    {
+        const ijk offset = tilted_path[ilay];
+        for (int iy=0; iy<n_y; ++iy)
+            for (int ix=0; ix<n_x; ++ix)
+            {
+                const int idx_out  = ix + iy*n_y + ilay*n_y*n_x;
+                const int idx_in = (ix + offset.i)%n_x + (iy+offset.j)%n_y * n_x + offset.k*n_y*n_x;
+                const Float dz_local =  zh[offset.k+1] - zh[offset.k];
+                water_path_tmp[idx_out] = water_path[idx_in]/dz_local;
+                effective_size_tmp[idx_out] = effective_size[idx_in];
+            }
+    }
+
+    water_path.resize(water_path_tmp.size());
+    water_path = water_path_tmp;
+    effective_size.resize(effective_size_tmp.size());
+    effective_size = effective_size_tmp;
+}
+
+void compress_columns_weighted_avg_clouds_simple(const int n_x, const int n_y,
+                                          const int n_out,
+                                          const int n_tilt,
+                                          const Array<ijk,1>& path,
+                                          std::vector<Float>& water_path,
+                                          std::vector<Float>& effective_size,
+                                          const std::vector<Float>& zh)
+{
+    std::vector<Float> water_path_tmp(n_out * n_x * n_y);
+    std::vector<Float> effective_size_tmp(n_out * n_x * n_y);
+    const std::vector<ijk>& tilted_path_v = path.v();
+
+#pragma omp parallel for
+    for (int ilay = 0; ilay < n_out; ++ ilay)
+    {
+        for (int iy = 0; iy < n_y; ++iy)
+        {
+            for (int ix = 0; ix < n_x; ++ix)
+            {
+                const int out_idx = ix + iy * n_x + ilay * n_x * n_y;
+                Float t_sum = 0.0;
+                Float sum = 0.0;
+                Float w_sum = 0.0;
+                Float avg = 0.0;
+                int num_inputs = 0;
+
+                for (int ilay_tilt = 0; ilay_tilt < n_tilt; ++ilay_tilt)
+                {
+                    const ijk offset = tilted_path_v[ilay_tilt];
+                    if (offset.k == ilay)
+                    {
+                        int in_idx = ix + iy * n_x + ilay_tilt * n_x * n_y;
+                        const Float dz_local = zh[ilay_tilt+1] - zh[ilay_tilt];
+                        sum += water_path[in_idx] * dz_local;
+
+                        t_sum += effective_size[in_idx] * water_path[in_idx];
+                        w_sum += water_path[in_idx];
+                        avg += effective_size[in_idx];
+                        num_inputs += 1;
+                    }
+                }
+
+                water_path_tmp[out_idx] = sum;
+                if (w_sum > 1e-6)
+                    effective_size_tmp[out_idx] = t_sum / w_sum;
+                else
+                    effective_size_tmp[out_idx] = avg / num_inputs;
+            }
+        }
+    }
+    water_path.resize(water_path_tmp.size());
+    water_path = water_path_tmp;
+    effective_size.resize(effective_size_tmp.size());
+    effective_size = effective_size_tmp;
+}
+
+void translate_layers(const int n_x, const int n_y, const int n_z,
+                      const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
+                      const std::vector<ijk>& tilted_path, Array<Float,2>& flux, const bool forward)
+{
+    std::vector<Float> lay_tmp(n_z*n_x*n_y, Float(0.));
+
+    const int idx_top = zh.v().size() -1;   // -1 as zh is one longer than z (at which tilted path is defined)
+    for (int ilay=0; ilay<idx_top; ++ilay)
+    {
+        for (int k=0; k<zh_tilt.v().size(); ++k)
+        {
+            if (std::abs(zh_tilt.v()[k] - zh.v()[ilay]) < 1e-2)
+            {
+                const ijk offset = tilted_path[k];
+                for (int iy = 0; iy < n_y; ++iy)
+                    for (int ix = 0; ix < n_x; ++ix)
+                    {
+                        const int idx_straight = ix + iy * n_x + ilay * n_y * n_x;
+                        const int modulo_x = ix - offset.i < 0 ? (ix - offset.i)% n_x + n_x: (ix - offset.i)% n_x;
+                        const int modulo_y = iy - offset.j < 0 ? (iy - offset.j)% n_y + n_y: (iy - offset.j)% n_y;
+                        const int idx_tilted = modulo_x + modulo_y * n_x + ilay * n_y * n_x;
+                        if (forward)
+                            lay_tmp[idx_tilted] = flux.ptr()[idx_straight];
+                        else
+                            lay_tmp[idx_straight] = flux.ptr()[idx_tilted];
+                    }
+            }
+        }
+    }
+
+    flux = std::move(lay_tmp);
+}
+
+void translate_levels(const int n_x, const int n_y, const int n_zh,
+                      const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
+                      const std::vector<ijk>& tilted_path, Array<Float,2>& flux, const bool forward)
+{
+    std::vector<Float> lev_tmp(n_zh*n_x*n_y, Float(0.));
+
+    const int idx_top = zh.v().size() -1;   // -1 as zh is one longer than z (at which tilted path is defined)
+    for (int ilay=0; ilay<idx_top; ++ilay)
+    {
+        for (int k=0; k<zh_tilt.v().size(); ++k)
+        {
+            if (std::abs(zh_tilt.v()[k] - zh.v()[ilay]) < 1e-2)
+            {
+                const ijk offset = tilted_path[k];
+                for (int iy = 0; iy < n_y; ++iy)
+                    for (int ix = 0; ix < n_x; ++ix)
+                    {
+                        const int idx_straight = ix + iy * n_x + ilay * n_y * n_x;
+                        const int modulo_x = ix - offset.i < 0 ? (ix - offset.i)% n_x + n_x: (ix - offset.i)% n_x;
+                        const int modulo_y = iy - offset.j < 0 ? (iy - offset.j)% n_y + n_y: (iy - offset.j)% n_y;
+                        const int idx_tilted = modulo_x + modulo_y * n_x + ilay * n_y * n_x;
+                        if (forward)
+                            lev_tmp[idx_tilted] = flux.ptr()[idx_straight];
+                        else
+                            lev_tmp[idx_straight] = flux.ptr()[idx_tilted];
+                    }
+            }
+        }
+    }
+    // do the top level separately
+    const int idx_top_tilt = zh_tilt.v().size()-2;       // -2: -1 for index starting at zero and -1 as zh is one longer than z
+    const ijk offset_tod = tilted_path[idx_top_tilt];
+    for (int ilev=idx_top; ilev < n_zh; ++ilev)
+    {
+        for (int iy = 0; iy < n_y; ++iy)
+            for (int ix = 0; ix < n_x; ++ix)
+            {
+                const int idx_straight = ix + iy * n_x + ilev * n_y * n_x;
+                const int modulo_x = ix - offset_tod.i < 0 ? (ix - offset_tod.i)% n_x + n_x: (ix - offset_tod.i)% n_x;
+                const int modulo_y = iy - offset_tod.j < 0 ? (iy - offset_tod.j)% n_y + n_y: (iy - offset_tod.j)% n_y;
+                const int idx_tilted = modulo_x + modulo_y * n_x + ilev * n_y * n_x;
+
+                lev_tmp[idx_straight] = flux.ptr()[idx_tilted];
+            }
+    }
+    flux = std::move(lev_tmp);
+}
+
+void tica_tilt_simple(
+        const Float sza, const Float azi,
+        const int n_col_x, const int n_col_y, const int n_col,
+        const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in ,
+        Array<Float,1> xh, Array<Float,1> yh, Array<Float,1> zh, Array<Float,1> z,
+        Array<Float,2> p_lay, Array<Float,2> t_lay, Array<Float,2> p_lev, Array<Float,2> t_lev,
+        Array<Float,2> lwp, Array<Float,2> iwp, Array<Float,2> rel, Array<Float,2> dei, Array<Float,2> rh,
+        Gas_concs gas_concs, Aerosol_concs aerosol_concs,
+        Array<Float,2>& p_lay_out, Array<Float,2>& t_lay_out, Array<Float,2>& p_lev_out, Array<Float,2>& t_lev_out,
+        Array<Float,2>& lwp_out, Array<Float,2>& iwp_out, Array<Float,2>& rel_out, Array<Float,2>& dei_out, Array<Float,2>& rh_out,
+        Gas_concs& gas_concs_out, Aerosol_concs& aerosol_concs_out,
+        std::vector<std::string>& gas_names, std::vector<std::string>& aerosol_names,
+        bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
+        int rnd_seed
+)
+{
+    ////// SETUP FOR CENTER START POINT TILTING //////
+    Array<ijk,1> center_path;
+    Array<Float,1> center_zh_tilt;
+
+    tilted_path(xh.v(),yh.v(),zh.v(),z.v(),sza,azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
+
+    int n_zh_tilt_center = center_zh_tilt.v().size();
+    int n_z_tilt_center = n_zh_tilt_center - 1;
+
+    center_path.set_dims({n_z_tilt_center});
+    center_zh_tilt.set_dims({n_zh_tilt_center});
+
+    //// translate temperature and pressure ////
+    const bool forward = true;
+    translate_layers(n_col_x, n_col_y, n_z_in, center_zh_tilt, zh, center_path.v(), p_lay_out, forward);
+    translate_layers(n_col_x, n_col_y, n_z_in, center_zh_tilt, zh, center_path.v(), t_lay_out, forward);
+    translate_levels(n_col_x, n_col_y, n_zh_in, center_zh_tilt, zh, center_path.v(), p_lev_out, forward);
+    translate_levels(n_col_x, n_col_y, n_zh_in, center_zh_tilt, zh, center_path.v(), t_lev_out, forward);
+    t_lay_out.expand_dims({n_col, n_z_in});
+    t_lev_out.expand_dims({n_col, n_zh_in});
+    p_lay_out.expand_dims({n_col, n_z_in});
+    p_lev_out.expand_dims({n_col, n_zh_in});
+
+    //// tilt and compress gasses ////
+    for (const auto& gas_name : gas_names) {
+        if (!gas_concs_out.exists(gas_name)) {
+            continue;
+        }
+        const Array<Float,2>& gas = gas_concs_out.get_vmr(gas_name);
+        if (gas.size() > 1) {
+            if (gas.get_dims()[0] > 1) { // checking: do we have 3D field?
+                Array<Float,2> gas_tmp(gas);
+                create_tilted_columns_simple(n_col_x, n_col_y, center_path.v(), gas_tmp.v());
+                gas_tmp.expand_dims({n_col, n_z_tilt_center});
+                compress_columns_weighted_avg_simple(n_col_x, n_col_y,
+                                                     n_z_in, n_z_tilt_center,
+                                                     center_path,
+                                                     gas_tmp.v(),
+                                                     center_zh_tilt.v());
+                gas_tmp.expand_dims({n_col, n_z_in});
+                gas_concs_out.set_vmr(gas_name, gas_tmp);
+            }
+            else {
+                throw std::runtime_error("No tilted column implementation for single column profiles.");
+            }
+        }
+    }
+
+    //// tilt and compress aerosols ////
+    if (switch_aerosol_optics)
+    {
+        // should we just recompute relative humidity after tilting water vapour and temperature?
+        create_tilted_columns_simple(n_col_x, n_col_y, center_path.v(), rh_out.v());
+        rh_out.expand_dims({n_col, n_z_tilt_center});
+        compress_columns_weighted_avg_simple(n_col_x, n_col_y,
+                                             n_z_in, n_z_tilt_center,
+                                             center_path,
+                                             rh_out.v(),
+                                             center_zh_tilt.v());
+        rh_out.expand_dims({n_col, n_z_in});
+
+        for (const auto& aerosol_name : aerosol_names) {
+            if (!aerosol_concs_out.exists(aerosol_name)) {
+                continue;
+            }
+            const Array<Float,2>& aerosol = aerosol_concs_out.get_vmr(aerosol_name);
+
+            if (aerosol.size() > 1) {
+                if (aerosol.get_dims()[0] > 1) { // checking: do we have 3D field?
+                    Array<Float,2> gas_tmp(aerosol);
+                    create_tilted_columns_simple(n_col_x, n_col_y, center_path.v(), gas_tmp.v());
+                    gas_tmp.expand_dims({n_col, n_z_tilt_center});
+                    compress_columns_weighted_avg_simple(n_col_x, n_col_y,
+                                                         n_z_in, n_z_tilt_center,
+                                                         center_path,
+                                                         gas_tmp.v(),
+                                                         center_zh_tilt.v());
+                    gas_tmp.expand_dims({n_col, n_z_in});
+                    aerosol_concs_out.set_vmr(aerosol_name, gas_tmp);
+                }
+                else {
+                    throw std::runtime_error("No tilted column implementation for single column profiles.");
+                }
+            }
+        }
+    }
+
+    ////// clouds //////
+    if (switch_cloud_optics)
+    {
+        lwp_out = lwp;
+        rel_out = rel;
+        iwp_out = iwp;
+        dei_out = dei;
+        if (switch_liq_cloud_optics)
+        {
+            create_tilted_columns_clouds_simple(n_col_x, n_col_y, center_path.v(), lwp_out.v(), rel_out.v(), zh.v());
+            compress_columns_weighted_avg_clouds_simple(n_col_x, n_col_y, n_z_in, n_z_tilt_center, center_path, lwp_out.v(), rel_out.v(), center_zh_tilt.v());
+        }
+        if (switch_ice_cloud_optics)
+        {
+            create_tilted_columns_clouds_simple(n_col_x, n_col_y, center_path.v(), iwp_out.v(), dei_out.v(), zh.v());
+            compress_columns_weighted_avg_clouds_simple(n_col_x, n_col_y, n_z_in, n_z_tilt_center, center_path, iwp_out.v(), dei_out.v(), center_zh_tilt.v());
+        }
+    }
+
+    ///// restore background column info, as this is (partly) overwritten //////
+    restore_bkg_profile_bundle(n_col_x, n_col_y,
+                               n_lay, n_lev, n_lay, n_lev,
+                               n_z_in, n_zh_in, n_z_in, n_zh_in,
+                               &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out,
+                               &lwp_out, &iwp_out, &rel_out, &dei_out, &rh_out,
+                               gas_concs_out, aerosol_concs_out,
+                               &p_lay, &t_lay, &p_lev, &t_lev,
+                               &lwp, &iwp, &rel, &dei, &rh,
+                               gas_concs, aerosol_concs,
+                               gas_names, aerosol_names,
+                               switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics
+    );
+}
+
