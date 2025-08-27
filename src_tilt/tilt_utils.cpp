@@ -1374,17 +1374,18 @@ void translate_levels(const int n_x, const int n_y, const int n_zh,
                 const int modulo_y = iy - offset_tod.j < 0 ? (iy - offset_tod.j)% n_y + n_y: (iy - offset_tod.j)% n_y;
                 const int idx_tilted = modulo_x + modulo_y * n_x + ilev * n_y * n_x;
 
-                lev_tmp[idx_straight] = flux.ptr()[idx_tilted];
+                if (forward)
+                    lev_tmp[idx_tilted] = flux.ptr()[idx_straight];
+                else
+                    lev_tmp[idx_straight] = flux.ptr()[idx_tilted];
             }
     }
     flux = std::move(lev_tmp);
 }
 
 void tica_tilt_simple(
-        const Float sza, const Float azi,
         const int n_col_x, const int n_col_y, const int n_col,
-        const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in ,
-        Array<Float,1> xh, Array<Float,1> yh, Array<Float,1> zh, Array<Float,1> z,
+        const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in, Array<Float,1> zh,
         Array<Float,2> p_lay, Array<Float,2> t_lay, Array<Float,2> p_lev, Array<Float,2> t_lev,
         Array<Float,2> lwp, Array<Float,2> iwp, Array<Float,2> rel, Array<Float,2> dei, Array<Float,2> rh,
         Gas_concs gas_concs, Aerosol_concs aerosol_concs,
@@ -1393,21 +1394,9 @@ void tica_tilt_simple(
         Gas_concs& gas_concs_out, Aerosol_concs& aerosol_concs_out,
         std::vector<std::string>& gas_names, std::vector<std::string>& aerosol_names,
         bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
-        int rnd_seed
+        Array<ijk,1> center_path, Array<Float,1> center_zh_tilt, const int n_z_tilt_center
 )
 {
-    ////// SETUP FOR CENTER START POINT TILTING //////
-    Array<ijk,1> center_path;
-    Array<Float,1> center_zh_tilt;
-
-    tilted_path(xh.v(),yh.v(),zh.v(),z.v(),sza,azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
-
-    int n_zh_tilt_center = center_zh_tilt.v().size();
-    int n_z_tilt_center = n_zh_tilt_center - 1;
-
-    center_path.set_dims({n_z_tilt_center});
-    center_zh_tilt.set_dims({n_zh_tilt_center});
-
     //// translate temperature and pressure ////
     const bool forward = true;
     translate_layers(n_col_x, n_col_y, n_z_in, center_zh_tilt, zh, center_path.v(), p_lay_out, forward);

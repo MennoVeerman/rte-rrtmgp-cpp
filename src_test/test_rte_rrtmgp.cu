@@ -412,7 +412,12 @@ void solve_radiation(int argc, char** argv)
         tica_azi = azi.v()[0];
 
         tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
-        int n_z_tilt_center = center_zh_tilt.v().size() - 1;
+
+        int n_zh_tilt_center = center_zh_tilt.v().size();
+        int n_z_tilt_center = n_zh_tilt_center - 1;
+
+        center_path.set_dims({n_z_tilt_center});
+        center_zh_tilt.set_dims({n_zh_tilt_center});
 
         for (int icol = 1; icol <= n_col; ++icol) {
             mu0({icol}) = 1.0;
@@ -442,6 +447,8 @@ void solve_radiation(int argc, char** argv)
             }
         }
 
+
+        // everything below this line should be done later on the gpu //
         Array<Float, 2> t_lay_out = t_lay;
         Array<Float, 2> t_lev_out = t_lev;
         Array<Float, 2> p_lay_out = p_lay;
@@ -459,11 +466,8 @@ void solve_radiation(int argc, char** argv)
         Array<Float,2> dei_out;
         dei_out.set_dims({n_col, n_z_in});
 
-        tica_tilt_simple(
-                tica_sza, tica_azi,
-                n_col_x, n_col_y, n_col,
-                n_lay, n_lev, n_z_in, n_zh_in,
-                xh, yh, zh, z,
+        tica_tilt_simple(n_col_x, n_col_y, n_col,
+                n_lay, n_lev, n_z_in, n_zh_in, zh,
                 p_lay, t_lay, p_lev, t_lev,
                 lwp, iwp, rel, dei, rh,
                 gas_concs, aerosol_concs,
@@ -472,7 +476,7 @@ void solve_radiation(int argc, char** argv)
                 gas_concs_out, aerosol_concs_out,
                 gas_names, aerosol_names,
                 switch_cloud_optics, switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics,
-                rnd_seed
+                center_path, center_zh_tilt, n_z_tilt_center
         );
 
         lwp_out.expand_dims({n_col, n_lay});
@@ -499,7 +503,8 @@ void solve_radiation(int argc, char** argv)
 
         gas_concs = gas_concs_out;
 
-        Status::print_message("tilted path created");
+        // everything above this line should be done later on the gpu //
+
         Status::print_message("tilted path created");
         cudaEventRecord(stop, 0);
         cudaEventSynchronize(stop);
@@ -847,6 +852,8 @@ void solve_radiation(int argc, char** argv)
             Array_gpu<Float,2> rh_gpu(rh);
             Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
 
+            // do gpu tilting here
+
             cudaDeviceSynchronize();
             cudaEvent_t start;
             cudaEvent_t stop;
@@ -908,6 +915,8 @@ void solve_radiation(int argc, char** argv)
                 run_solver();
         }
 
+        // do gpu back-tilt here
+
         // Store the output.
         Status::print_message("Storing the shortwave output.");
         Array<Float,3> sw_tau_cpu(sw_tau);
@@ -923,22 +932,24 @@ void solve_radiation(int argc, char** argv)
         Array<Float,3> sw_bnd_flux_dn_dir_cpu(sw_bnd_flux_dn_dir);
         Array<Float,3> sw_bnd_flux_net_cpu(sw_bnd_flux_net);
 
+        // this 'if' should be done before on the gpu
         if (switch_tica)
         {
             // tilt back results or homogenize in case of high sza (> 85 degrees)
             if (do_tilting)
             {
+                const bool forward = false;
                 // sw_flux_dn
-                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
+                translate_levels(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu, forward);
 
                 // sw_flux_dn_dir
-                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
+                translate_levels(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu, forward);
 
                 // sw_flux_up
-                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
+                translate_levels(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu, forward);
 
                 // sw_flux_net
-                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
+                translate_levels(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu, forward);
             }
             else
             {
