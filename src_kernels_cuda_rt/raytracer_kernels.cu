@@ -120,6 +120,7 @@ namespace
 __global__
 void ray_tracer_kernel(
         const Bool independent_column,
+        const Bool independent_column_diffuse,
         const Int photons_to_shoot,
         const Int qrng_grid_x,
         const Int qrng_grid_y,
@@ -216,11 +217,25 @@ void ray_tracer_kernel(
         {
             if (!independent_column)
             {
-                const Float dx = photon.direction.x * (s_min + d_max);
-                const Float dy = photon.direction.y * (s_min + d_max);
+                if (!independent_column_diffuse)
+                {
+                    const Float dx = photon.direction.x * (s_min + d_max);
+                    const Float dy = photon.direction.y * (s_min + d_max);
 
-                photon.position.x += dx;
-                photon.position.y += dy;
+                    photon.position.x += dx;
+                    photon.position.y += dy;
+                }
+                else
+                {
+                    if (photon.kind == Photon_kind::Direct)
+                    {
+                        const Float dx = photon.direction.x * (s_min + d_max);
+                        const Float dy = photon.direction.y * (s_min + d_max);
+
+                        photon.position.x += dx;
+                        photon.position.y += dy;
+                    }
+                }
             }
 
             const Float dz = photon.direction.z * (s_min + d_max);
@@ -317,18 +332,39 @@ void ray_tracer_kernel(
                 photon.position.z += photon.direction.z>0 ? s_min : -s_min;
                 if (!independent_column)
                 {
-                    photon.position.x += photon.direction.x>0 ? s_min : -s_min;
-                    photon.position.y += photon.direction.y>0 ? s_min : -s_min;
+                    if (!independent_column_diffuse)
+                    {
+                        photon.position.x += photon.direction.x>0 ? s_min : -s_min;
+                        photon.position.y += photon.direction.y>0 ? s_min : -s_min;
 
-                    // Cyclic boundary condition in x.
-                    photon.position.x = fmod(photon.position.x, grid_size.x);
-                    if (photon.position.x < Float(0.))
-                        photon.position.x += grid_size.x;
+                        // Cyclic boundary condition in x.
+                        photon.position.x = fmod(photon.position.x, grid_size.x);
+                        if (photon.position.x < Float(0.))
+                            photon.position.x += grid_size.x;
 
-                    // Cyclic boundary condition in y.
-                    photon.position.y = fmod(photon.position.y, grid_size.y);
-                    if (photon.position.y < Float(0.))
-                        photon.position.y += grid_size.y;
+                        // Cyclic boundary condition in y.
+                        photon.position.y = fmod(photon.position.y, grid_size.y);
+                        if (photon.position.y < Float(0.))
+                            photon.position.y += grid_size.y;
+                    }
+                    else
+                    {
+                        if (photon.kind == Photon_kind::Direct)
+                        {
+                            photon.position.x += photon.direction.x>0 ? s_min : -s_min;
+                            photon.position.y += photon.direction.y>0 ? s_min : -s_min;
+
+                            // Cyclic boundary condition in x.
+                            photon.position.x = fmod(photon.position.x, grid_size.x);
+                            if (photon.position.x < Float(0.))
+                                photon.position.x += grid_size.x;
+
+                            // Cyclic boundary condition in y.
+                            photon.position.y = fmod(photon.position.y, grid_size.y);
+                            if (photon.position.y < Float(0.))
+                                photon.position.y += grid_size.y;
+                        }
+                    }
                 }
                 tau -= d_max * k_ext_null;
                 d_max = Float(0.);
@@ -342,11 +378,25 @@ void ray_tracer_kernel(
 
             if (!independent_column)
             {
-                Float dx = photon.direction.x * dn;
-                Float dy = photon.direction.y * dn;
+                if (!independent_column_diffuse)
+                {
+                    Float dx = photon.direction.x * dn;
+                    Float dy = photon.direction.y * dn;
 
-                photon.position.x = (dx > 0) ? min(photon.position.x + dx, (i_n+1) * kn_grid_d.x - s_min) : max(photon.position.x + dx, (i_n) * kn_grid_d.x + s_min);
-                photon.position.y = (dy > 0) ? min(photon.position.y + dy, (j_n+1) * kn_grid_d.y - s_min) : max(photon.position.y + dy, (j_n) * kn_grid_d.y + s_min);
+                    photon.position.x = (dx > 0) ? min(photon.position.x + dx, (i_n+1) * kn_grid_d.x - s_min) : max(photon.position.x + dx, (i_n) * kn_grid_d.x + s_min);
+                    photon.position.y = (dy > 0) ? min(photon.position.y + dy, (j_n+1) * kn_grid_d.y - s_min) : max(photon.position.y + dy, (j_n) * kn_grid_d.y + s_min);
+                }
+                else
+                {
+                    if (photon.kind == Photon_kind::Direct)
+                    {
+                        Float dx = photon.direction.x * dn;
+                        Float dy = photon.direction.y * dn;
+
+                        photon.position.x = (dx > 0) ? min(photon.position.x + dx, (i_n+1) * kn_grid_d.x - s_min) : max(photon.position.x + dx, (i_n) * kn_grid_d.x + s_min);
+                        photon.position.y = (dy > 0) ? min(photon.position.y + dy, (j_n+1) * kn_grid_d.y - s_min) : max(photon.position.y + dy, (j_n) * kn_grid_d.y + s_min);
+                    }
+                }
             }
 
             // Calculate the 3D index.

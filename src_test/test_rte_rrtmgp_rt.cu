@@ -231,6 +231,7 @@ void solve_radiation(int argc, char** argv)
         {"two-stream"        , { true, "Run two-stream solver for to obtain 1D fluxes" }},
         {"raytracing"        , { true,  "Use raytracing for flux computation. '--raytracing 256': use 256 rays per pixel" }},
         {"independent-column", { false, "run raytracer in independent column mode"}},
+        {"independent-column-diffuse", { false, "run raytracer in independent column mode"}},
         {"cloud-optics"      , { false, "Enable cloud optics (both liquid and ice)."}},
         {"liq-cloud-optics"  , { false, "liquid only cloud optics."                 }},
         {"ice-cloud-optics"  , { false, "ice only cloud optics."                    }},
@@ -255,6 +256,7 @@ void solve_radiation(int argc, char** argv)
     const bool switch_twostream         = command_line_switches.at("two-stream"        ).first;
     const bool switch_raytracing        = command_line_switches.at("raytracing"        ).first;
     bool switch_independent_column= command_line_switches.at("independent-column").first;
+    bool switch_independent_column_diffuse = command_line_switches.at("independent-column-diffuse").first;
     bool switch_cloud_optics      = command_line_switches.at("cloud-optics"      ).first;
     bool switch_liq_cloud_optics  = command_line_switches.at("liq-cloud-optics"  ).first;
     bool switch_ice_cloud_optics  = command_line_switches.at("ice-cloud-optics"  ).first;
@@ -989,6 +991,7 @@ void solve_radiation(int argc, char** argv)
                     switch_twostream,
                     switch_raytracing,
                     switch_independent_column,
+                    switch_independent_column_diffuse,
                     switch_cloud_optics,
                     switch_cloud_mie,
                     switch_aerosol_optics,

@@ -102,6 +102,7 @@ class Radiation_solver_shortwave
                 const bool switch_twostream,
                 const bool switch_raytracing,
                 const bool switch_independent_column,
+                const bool switch_independent_column_diffuse,
                 const bool switch_cloud_optics,
                 const bool switch_cloud_mie,
                 const bool switch_aerosol_optics,
