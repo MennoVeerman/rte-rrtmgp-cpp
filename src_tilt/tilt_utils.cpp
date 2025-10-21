@@ -822,7 +822,7 @@ void tica_tilt(
 
         for (int icol = 1; icol <= n_col; ++icol)
         {
-            for (int ilay = 1; ilay <= n_zh_in; ++ilay)
+            for (int ilay = 1; ilay <= n_z_in; ++ilay)
             {
                 Float dz = zh({ilay + 1}) - zh({ilay});
                 if (switch_liq_cloud_optics)
@@ -860,7 +860,7 @@ void tica_tilt(
                     // determine lwp in tilted column (at tilted column layers)
                     for (int ilay=0; ilay < n_z_tilt; ++ilay)
                     {
-                        Float dz = zh_tilt({ilay + 1}) - zh_tilt({ilay});
+                        Float dz = zh_tilt({ilay + 2}) - zh_tilt({ilay + 1});
                         const ijk offset = tilted_path_v[ilay];
                         const int i_col_new  = ((idx_y+offset.j)%n_col_y) * n_col_x + ((idx_x + offset.i)%n_col_x);
                         const int idx_in = offset.k + i_col_new*n_z_in;
@@ -924,7 +924,7 @@ void tica_tilt(
                     // determine iwp in tilted column (at tilted column layers)
                     for (int ilay=0; ilay < n_z_tilt; ++ilay)
                     {
-                        Float dz = zh_tilt({ilay + 1}) - zh_tilt({ilay});
+                        Float dz = zh_tilt({ilay + 2}) - zh_tilt({ilay + 1});
                         const ijk offset = tilted_path_v[ilay];
                         const int i_col_new  = ((idx_y+offset.j)%n_col_y) * n_col_x + ((idx_x + offset.i)%n_col_x);
                         const int idx_in = offset.k + i_col_new*n_z_in;
