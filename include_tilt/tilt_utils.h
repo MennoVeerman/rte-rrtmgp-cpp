@@ -28,10 +28,10 @@ inline int sign(Float value)
     return (Float(0.) < value) - (value < Float(0.));
 }
 
-void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
-        std::vector<Float>& zh, std::vector<Float>& z,
-        Float sza, Float azi,
-        Float x_start, Float y_start,
+void create_tilted_path(const std::vector<Float>& xh, const std::vector<Float>& yh,
+        const std::vector<Float>& zh, const std::vector<Float>& z,
+        const Float sza, const Float azi,
+        const Float x_start, const Float y_start,
         std::vector<ijk>& tilted_path,
         std::vector<Float>& zh_tilted);
 
@@ -84,8 +84,8 @@ void tilt_and_compress_fields(const int n_z_in, const int n_zh_in, const int n_c
     const int n_z_tilt, const int n_zh_tilt, const int n_col,
     const Array<Float,1>& zh, const Array<Float,1>& z,
     const Array<Float,1>& zh_tilt, const Array<ijk,1>& path,
-    Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy, 
-    Array<Float,2>* rh_copy, 
+    Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy,
+    Array<Float,2>* rh_copy,
     Gas_concs& gas_concs_copy, const std::vector<std::string>& gas_names,
     Aerosol_concs& aerosol_concs_copy, const std::vector<std::string>& aerosol_names, const bool switch_aerosol_optics
     );

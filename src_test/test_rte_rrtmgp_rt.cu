@@ -521,7 +521,7 @@ void solve_radiation(int argc, char** argv)
         z.set_dims({n_z_in});
         z = std::move(input_nc.get_variable<Float>("z", {n_z_in}));
 
-        tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
+        create_tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
         int n_z_tilt_center = center_zh_tilt.v().size() - 1;
 
         for (int icol=1; icol<=n_col; ++icol)

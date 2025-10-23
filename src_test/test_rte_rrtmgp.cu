@@ -411,7 +411,7 @@ void solve_radiation(int argc, char** argv)
         tica_sza = acos(mu0.v()[0]);
         tica_azi = azi.v()[0];
 
-        tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
+        create_tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
 
         int n_zh_tilt_center = center_zh_tilt.v().size();
         int n_z_tilt_center = n_zh_tilt_center - 1;

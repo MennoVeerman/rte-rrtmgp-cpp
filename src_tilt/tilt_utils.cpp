@@ -14,12 +14,10 @@
 #include "Aerosol_optics_rt.h"
 #include "tilt_utils.h"
 #include "types.h"
-
-
-void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
-                 std::vector<Float>& zh, std::vector<Float>& z,
-                 Float sza, Float azi,
-                 Float x_start, Float y_start,
+void create_tilted_path(const std::vector<Float>& xh, const std::vector<Float>& yh,
+                 const std::vector<Float>& zh, const std::vector<Float>& z,
+                 const Float sza, const Float azi,
+                 const Float x_start, const Float y_start,
                  std::vector<ijk>& tilted_path,
                  std::vector<Float>& zh_tilted)
 {
@@ -138,18 +136,6 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
         // Record the path segment
         dz_tilted[z_idx] += dz0;
 
-        // Record boundary crossing
-        // if path is larger than 1 cm
-        if (l > min_step)
-        {
-            if ((std::abs(l - lx) < epsilon) || (std::abs(l - ly) < epsilon) ||
-                ((std::abs(l - lz) < epsilon || zp >= zh[k + 1]))) {
-                // Create a new path segment after crossing boundary
-                tilted_path.push_back({i, j, k});
-                dz_tilted.push_back(0.0);
-                z_idx += 1;
-            }
-        }
 
         // Check z boundary crossing
         if ((std::abs(l - lz) < epsilon || zp >= zh[k+1])) {
@@ -170,6 +156,20 @@ void tilted_path(std::vector<Float>& xh, std::vector<Float>& yh,
             i = int(i + sign(dx0));
             i = (i == -1) ? n_x - 1 : i%n_x;
             xp = dx0 < 0 ? xh[i+1] : xh[i];
+        }
+
+        // Record boundary crossing
+        // if path is larger than 1 cm
+        if (l > min_step)
+        {
+            if ((std::abs(l - lx) < epsilon) || (std::abs(l - ly) < epsilon) ||
+                ((std::abs(l - lz) < epsilon || zp >= zh[k + 1]))) {
+                // Create a new path segment after crossing boundary
+                tilted_path.push_back({i, j, k});
+                dz_tilted.push_back(0.0);
+                z_idx += 1;
+
+            }
         }
     }
     // Construct final zh_tilted
@@ -408,7 +408,7 @@ void compress_columns_weighted_avg(const int n_x, const int n_y,
     var = var_tmp;
 }
 
-void compress_columns_p_or_t(const int n_x, const int n_y, 
+void compress_columns_p_or_t(const int n_x, const int n_y,
                       const int n_out_lay,  const int n_tilt,
                       const Array<ijk,1>& path,
                       const Array<Float,1>& zh_tilt, const Array<Float,1>& zh,
@@ -450,9 +450,10 @@ void compress_columns_p_or_t(const int n_x, const int n_y,
             for (int ix = 0; ix < n_x; ++ix)
             {
                 const int out_idx = ix + iy * n_x + ilay * n_x * n_y;
+                const int out_idx_top = ix + iy * n_x + (ilay+1) * n_x * n_y;
                 const float dz =  zh.v()[ilay+1] - zh.v()[ilay];
                 var_tmp_lay[out_idx] = (var_tmp_lev[out_idx] * (z.v()[ilay] - zh.v()[ilay]) / dz
-                                        + var_tmp_lev[out_idx + 1] * (zh.v()[ilay + 1] - z.v()[ilay]) / dz);
+                                        + var_tmp_lev[out_idx_top] * (zh.v()[ilay + 1] - z.v()[ilay]) / dz);
             }
         }
     }
@@ -464,8 +465,8 @@ void tilt_and_compress_fields(const int n_z_in, const int n_zh_in, const int n_c
     const int n_z_tilt, const int n_zh_tilt, const int n_col,
     const Array<Float,1>& zh, const Array<Float,1>& z,
     const Array<Float,1>& zh_tilt, const Array<ijk,1>& path,
-    Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy, 
-    Array<Float,2>* rh_copy, 
+    Array<Float,2>* p_lay_copy, Array<Float,2>* t_lay_copy, Array<Float,2>* p_lev_copy, Array<Float,2>* t_lev_copy,
+    Array<Float,2>* rh_copy,
     Gas_concs& gas_concs_copy, const std::vector<std::string>& gas_names,
     Aerosol_concs& aerosol_concs_copy, const std::vector<std::string>& aerosol_names, const bool switch_aerosol_optics)
 {
@@ -482,6 +483,7 @@ void tilt_and_compress_fields(const int n_z_in, const int n_zh_in, const int n_c
     t_lev_copy->expand_dims({n_col, n_zh_in});
 
     create_tilted_columns_levlay(n_col_x, n_col_y, n_z_in, n_zh_in, zh.v(), z.v(), zh_tilt.v(), path.v(), p_lay_copy->v(), p_lev_copy->v());
+
     p_lay_copy->expand_dims({n_col, n_z_tilt});
     p_lev_copy->expand_dims({n_col, n_zh_tilt});
     // do not compress P here, as pressure at tilted levels is required for weighting of gasses and aerosol
@@ -526,7 +528,7 @@ void tilt_and_compress_fields(const int n_z_in, const int n_zh_in, const int n_c
             else {
                 throw std::runtime_error("No tilted column implementation for single column profiles.");
             }
-        } 
+        }
     }
 
     // aerosols
@@ -564,7 +566,7 @@ void tilt_and_compress_fields(const int n_z_in, const int n_zh_in, const int n_c
                 else {
                     throw std::runtime_error("No tilted column implementation for single column profiles.");
                 }
-            } 
+            }
         }
     }
 
@@ -749,11 +751,10 @@ void tica_tilt(
     ////// SETUP FOR CENTER START POINT TILTING //////
     Array<ijk,1> center_path;
     Array<Float,1> center_zh_tilt;
-    tilted_path(xh.v(),yh.v(),zh.v(),z.v(),sza,azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
+    create_tilted_path(xh.v(),yh.v(),zh.v(),z.v(),sza,azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
 
     int n_zh_tilt_center = center_zh_tilt.v().size();
     int n_z_tilt_center = n_zh_tilt_center - 1;
-
     center_path.set_dims({n_z_tilt_center});
     center_zh_tilt.set_dims({n_zh_tilt_center});
 
@@ -794,7 +795,7 @@ void tica_tilt(
             Array<ijk,1> path;
             Array<Float,1> zh_tilt;
 
-            tilted_path(xh.v(), yh.v(), zh.v(), z.v(), sza, azi, x_start, y_start, path.v(), zh_tilt.v());
+            create_tilted_path(xh.v(), yh.v(), zh.v(), z.v(), sza, azi, x_start, y_start, path.v(), zh_tilt.v());
             int n_zh_tilt = zh_tilt.v().size();
             int n_z_tilt = n_zh_tilt - 1;
 
