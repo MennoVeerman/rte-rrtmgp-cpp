@@ -1,3 +1,6 @@
+#ifndef TILTED_COLUMN_H
+#define TILTED_COLUMN_H
+
 #include <cmath>
 #include <chrono>
 #include <iomanip>
@@ -34,6 +37,10 @@ void create_tilted_path(const std::vector<Float>& xh, const std::vector<Float>& 
         const Float x_start, const Float y_start,
         std::vector<ijk>& tilted_path,
         std::vector<Float>& zh_tilted);
+
+void get_tilted_path_bounds(const int n_z_tilt,
+                const std::vector<ijk>& tilted_path,
+                std::vector<int>& tilted_path_bounds);
 
 void post_process_output(const std::vector<ColumnResult>& col_results,
         const int n_col_x, const int n_col_y,
@@ -177,3 +184,62 @@ void tica_tilt_simple(const int n_col_x, const int n_col_y, const int n_col,
                       std::vector<std::string>& gas_names, std::vector<std::string>& aerosol_names,
                       bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
                       Array<ijk,1> center_path, Array<Float,1> center_zh_tilt, const int n_z_tilt_center);
+
+
+
+#ifdef __CUDACC__
+/// GPU functions
+void tica_tilt_gpu(const Float sza, const Float azi,
+    const int n_col_x, const int n_col_y, const int n_col,
+    const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in ,
+    Array<Float,1>& xh, Array<Float,1>& yh, Array<Float,1>& zh, Array<Float,1>& z,
+    Array_gpu<Float,2>& p_lay, Array_gpu<Float,2>& t_lay, Array_gpu<Float,2>& p_lev, Array_gpu<Float,2>& t_lev,
+    Array_gpu<Float,2>& lwp, Array_gpu<Float,2>& iwp, Array_gpu<Float,2>& rel, Array_gpu<Float,2>& dei, Array_gpu<Float,2>& rh,
+    Gas_concs_gpu& gas_concs, Aerosol_concs_gpu& aerosol_concs,
+    std::vector<std::string>& gas_names, std::vector<std::string>& aerosol_names,
+    bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
+    int rnd_seed);
+
+    // // esat and qsat functions taken from microHH
+    __host__ __device__
+    inline Float esat_liq(const Float T)
+    {
+        constexpr Float c00  = Float(+6.1121000000E+02);
+        constexpr Float c10  = Float(+4.4393067270E+01);
+        constexpr Float c20  = Float(+1.4279398448E+00);
+        constexpr Float c30  = Float(+2.6415206946E-02);
+        constexpr Float c40  = Float(+3.0291749160E-04);
+        constexpr Float c50  = Float(+2.1159987257E-06);
+        constexpr Float c60  = Float(+7.5015702516E-09);
+        constexpr Float c70  = Float(-1.5604873363E-12);
+        constexpr Float c80  = Float(-9.9726710231E-14);
+        constexpr Float c90  = Float(-4.8165754883E-17);
+        constexpr Float c100 = Float(+1.3839187032E-18);
+
+        const Float x = min(max(Float(-75.), T-Float(273.16)), Float(50.));       // Limit the temperature range to avoid numerical errors
+        return c00+x*(c10+x*(c20+x*(c30+x*(c40+x*(c50+x*(c60+x*(c70+x*(c80+x*(c90+x*c100)))))))));
+    }
+
+    __host__ __device__
+    inline Float qsat_liq(const Float p, const Float T)
+    {
+        constexpr Float ep = Float(0.219718);
+        return ep*esat_liq(T)/(p-(Float(1.)-ep)*esat_liq(T));
+    }
+
+    __host__ __device__
+    inline Float esat_ice(const Float T)
+    {
+        const Float x= min(max(Float(-100.), T-Float(273.16)), Float(50.));     // Limit the temperature range to avoid numerical errors
+        return Float(611.15)*exp(Float(22.452)*x / (Float(272.55)+x));
+    }
+
+    __host__ __device__
+    inline Float qsat_ice(const Float p, const Float T)
+    {
+        constexpr Float ep = Float(0.219718);
+        return ep*esat_ice(T)/(p-(Float(1.)-ep)*esat_ice(T));
+    }
+#endif
+
+#endif

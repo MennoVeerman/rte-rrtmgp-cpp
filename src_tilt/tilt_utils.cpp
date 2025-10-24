@@ -48,10 +48,11 @@ void create_tilted_path(const std::vector<Float>& xh, const std::vector<Float>& 
     const Float epsilon = 1e-8; // Small value to handle floating-point precision
     const Float min_step = 1e-2; // Minimum step size in meters
 
-    tilted_path.push_back({i, j, k}); // Add starting point
-    dz_tilted.push_back(0.0);
+    //tilted_path.push_back({i, j, k}); // Add starting point
+    //dz_tilted.push_back(0.0);
     z_idx = 0;
 
+    Float dz = 0;
     while (zp < z_top)
     {
         // Check bounds before accessing arrays
@@ -134,7 +135,22 @@ void create_tilted_path(const std::vector<Float>& xh, const std::vector<Float>& 
         zp += dz0;
 
         // Record the path segment
-        dz_tilted[z_idx] += dz0;
+        dz += dz0;
+
+        // Record boundary crossing
+        // if path is larger than 1 cm
+        if (l > min_step)
+        {
+            if ((std::abs(l - lx) < epsilon) || (std::abs(l - ly) < epsilon) ||
+                ((std::abs(l - lz) < epsilon || zp >= zh[k + 1]))) {
+                // Create a new path segment after crossing boundary
+                tilted_path.push_back({i, j, k});
+                dz_tilted.push_back(dz);
+                dz = 0;
+                z_idx += 1;
+
+            }
+        }
 
 
         // Check z boundary crossing
@@ -158,20 +174,10 @@ void create_tilted_path(const std::vector<Float>& xh, const std::vector<Float>& 
             xp = dx0 < 0 ? xh[i+1] : xh[i];
         }
 
-        // Record boundary crossing
-        // if path is larger than 1 cm
-        if (l > min_step)
-        {
-            if ((std::abs(l - lx) < epsilon) || (std::abs(l - ly) < epsilon) ||
-                ((std::abs(l - lz) < epsilon || zp >= zh[k + 1]))) {
-                // Create a new path segment after crossing boundary
-                tilted_path.push_back({i, j, k});
-                dz_tilted.push_back(0.0);
-                z_idx += 1;
-
-            }
-        }
     }
+
+    tilted_path.push_back({i, j, k});
+
     // Construct final zh_tilted
     zh_tilted.clear();
     zh_tilted.push_back(0.);
@@ -179,6 +185,28 @@ void create_tilted_path(const std::vector<Float>& xh, const std::vector<Float>& 
         zh_tilted.push_back(zh_tilted[iz] + dz_tilted[iz]);
     }
 }
+
+void get_tilted_path_bounds(const int n_z_tilt,
+                const std::vector<ijk>& tilted_path,
+                std::vector<int>& tilted_path_bounds)
+{
+    int k = 0;
+    int ilay = 0;
+
+    tilted_path_bounds[ilay] = k;
+
+    for (int i=1; i < n_z_tilt; ++i)
+    {
+        if (tilted_path[i].k > k)
+        {
+            ++ilay;
+            tilted_path_bounds[ilay] = i;
+            k = tilted_path[i].k;
+        }
+    }
+}
+
+
 
 void restore_bkg_profile(const int n_x, const int n_y,
                       const int n_full,
@@ -584,8 +612,8 @@ void create_tilted_columns(const int n_x, const int n_y, const int n_lay_in, con
                            const std::vector<Float>& zh_tilted, const std::vector<ijk>& tilted_path,
                            std::vector<Float>& var)
 {
-    const int n_lay = tilted_path.size();
     const int n_lev = zh_tilted.size();
+    const int n_lay = n_lev-1;
 
     std::vector<Float> var_tmp(n_lay*n_x*n_y);
 
@@ -690,8 +718,8 @@ void create_tilted_columns_levlay(const int n_x, const int n_y, const int n_lay_
                                  std::vector<Float>& var_lay, std::vector<Float>& var_lev)
 
 {
-    const int n_lay = tilted_path.size();
     const int n_lev = zh_tilted.size();
+    const int n_lay = n_lev - 1;
     std::vector<Float> z_tilted(n_lay);
     for (int ilay=0; ilay<n_lay; ++ilay)
         z_tilted[ilay] = (zh_tilted[ilay]+zh_tilted[ilay+1])/Float(2.);
@@ -755,8 +783,11 @@ void tica_tilt(
 
     int n_zh_tilt_center = center_zh_tilt.v().size();
     int n_z_tilt_center = n_zh_tilt_center - 1;
-    center_path.set_dims({n_z_tilt_center});
+    center_path.set_dims({n_zh_tilt_center});
     center_zh_tilt.set_dims({n_zh_tilt_center});
+
+    Array<int,1> center_path_bounds({n_zh_in});
+    get_tilted_path_bounds(n_z_tilt_center, center_path.v(), center_path_bounds.v());
 
     tilt_and_compress_fields(n_z_in, n_zh_in, n_col_x, n_col_y,
                 n_z_tilt_center, n_zh_tilt_center, n_col,
@@ -1147,7 +1178,8 @@ void tica_mean(Array<Float,3>& var, const int n_x, const int n_y, const int n_z_
 void create_tilted_columns_simple(const int n_x, const int n_y, const std::vector<ijk>& tilted_path,
                            std::vector<Float>& var)
 {
-    const int n_lay = tilted_path.size();
+    const int n_lev = tilted_path.size();
+    const int n_lay = n_lev - 1;
 
     std::vector<Float> var_tmp(n_lay*n_x*n_y);
 
@@ -1218,7 +1250,8 @@ void create_tilted_columns_clouds_simple(const int n_x, const int n_y, const std
                                   std::vector<Float>& water_path, std::vector<Float>& effective_size,
                                   const std::vector<Float>& zh)
 {
-    const int n_lay = tilted_path.size();
+    const int n_lev = tilted_path.size();
+    const int n_lay = n_lev-1;
 
     std::vector<Float> water_path_tmp(n_lay*n_x*n_y);
     std::vector<Float> effective_size_tmp(n_lay*n_x*n_y);
