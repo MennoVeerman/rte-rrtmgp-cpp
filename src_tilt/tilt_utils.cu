@@ -424,7 +424,6 @@ void tica_tilt_gpu(
     if (switch_aerosol_optics)
     {
         Array_gpu<Float,2> aerosol_tilt({n_col, n_z_tilt_center});
-        //Array_gpu<Float,2> aerosol_new({n_col, n_z_in});
 
         for (const auto& aerosol_name : aerosol_names)
         {
@@ -455,29 +454,6 @@ void tica_tilt_gpu(
             }
         }
     }
-
-
-
-
-    /*
-
-    // first function to move to GPU
-    tilt_and_compress_fields(n_z_in, n_zh_in, n_col_x, n_col_y,
-                n_z_tilt_center, n_zh_tilt_center, n_col,
-                zh, z,
-                center_zh_tilt, center_path,
-                &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out, &rh_out,
-                gas_concs_out, gas_names, aerosol_concs_out, aerosol_names, switch_aerosol_optics
-    );
-
-    const int n_lay_tilt = center_path.size();
-
-    Array_gpu<Float,2> lwp_tmp({n_col, n_lay_tilt});
-    Array_gpu<Float,2> rel_tmp({n_col, n_lay_tilt});
-    Array_gpu<Float,2> iwp_tmp({n_col, n_lay_tilt});
-    Array_gpu<Float,2> dei_tmp({n_col, n_lay_tilt});
-    */
-    ////// clouds //////
 
 
     if (switch_cloud_optics)
@@ -519,25 +495,5 @@ void tica_tilt_gpu(
         }
 
     }
-/*
-        post_process_output(col_results, n_col_x, n_col_y, n_z_in, n_zh_in,
-                            &lwp_out, &iwp_out, &rel_out, &dei_out,
-                            switch_liq_cloud_optics, switch_ice_cloud_optics);
-
-
-
-    restore_bkg_profile_bundle(n_col_x, n_col_y,
-                               n_lay, n_lev, n_lay, n_lev,
-                               n_z_in, n_zh_in, n_z_in, n_zh_in,
-                               &p_lay_out, &t_lay_out, &p_lev_out, &t_lev_out,
-                               &lwp_out, &iwp_out, &rel_out, &dei_out, &rh_out,
-                               gas_concs_out, aerosol_concs_out,
-                               &p_lay, &t_lay, &p_lev, &t_lev,
-                               &lwp, &iwp, &rel, &dei, &rh,
-                               gas_concs, aerosol_concs,
-                               gas_names, aerosol_names,
-                               switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics
-    );
-    */
 }
 

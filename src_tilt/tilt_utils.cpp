@@ -1436,7 +1436,8 @@ void tica_tilt_simple(
         }
         const Array<Float,2>& gas = gas_concs_out.get_vmr(gas_name);
         if (gas.size() > 1) {
-            if (gas.get_dims()[0] > 1) { // checking: do we have 3D field?
+            if (gas.get_dims()[0] > 1)
+            { // checking: do we have 3D field?
                 Array<Float,2> gas_tmp(gas);
                 create_tilted_columns_simple(n_col_x, n_col_y, center_path.v(), gas_tmp.v());
                 gas_tmp.expand_dims({n_col, n_z_tilt_center});

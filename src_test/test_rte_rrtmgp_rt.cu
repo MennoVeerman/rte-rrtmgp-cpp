@@ -544,61 +544,18 @@ void solve_radiation(int argc, char** argv)
             azi({icol}) = 0.0;
         }
 
-        Array<Float, 2> t_lay_out = t_lay;
-        Array<Float, 2> t_lev_out = t_lev;
-        Array<Float, 2> p_lay_out = p_lay;
-        Array<Float, 2> p_lev_out = p_lev;
-        Gas_concs gas_concs_out = gas_concs;
-        Aerosol_concs aerosol_concs_out = aerosol_concs;
-        Array<Float, 2> rh_out = rh;
-
-        Array<Float, 2> lwp_out;
-        lwp_out.set_dims({n_col, n_z_in});
-        Array<Float, 2> rel_out;
-        rel_out.set_dims({n_col, n_z_in});
-        Array<Float, 2> iwp_out;
-        iwp_out.set_dims({n_col, n_z_in});
-        Array<Float, 2> dei_out;
-        dei_out.set_dims({n_col, n_z_in});
-
-        tica_tilt(
+        tica_tilt_gpu(
                 tica_sza, tica_azi,
                 n_col_x, n_col_y, n_col,
                 n_lay, n_lev, n_z_in, n_zh_in,
                 xh, yh, zh, z,
-                p_lay, t_lay, p_lev, t_lev,
-                lwp, iwp, rel, dei, rh,
-                gas_concs, aerosol_concs,
-                p_lay_out, t_lay_out, p_lev_out, t_lev_out,
-                lwp_out, iwp_out, rel_out, dei_out, rh_out,
-                gas_concs_out, aerosol_concs_out,
+                p_lay_gpu, t_lay_gpu, p_lev_gpu, t_lev_gpu,
+                lwp_gpu, iwp_gpu, rel_gpu, dei_gpu, rh_gpu,
+                gas_concs_gpu, aerosol_concs_gpu,
                 gas_names, aerosol_names,
                 switch_cloud_optics, switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics,
                 rnd_seed
         );
-
-        lwp_out.expand_dims({n_col, n_lay});
-        rel_out.expand_dims({n_col, n_lay});
-        iwp_out.expand_dims({n_col, n_lay});
-        dei_out.expand_dims({n_col, n_lay});
-
-        if (switch_aerosol_optics)
-        {
-            rh_out.expand_dims({n_col, n_lay});
-            rh  = rh_out;
-            aerosol_concs = aerosol_concs_out;
-        }
-
-        lwp = lwp_out;
-        rel = rel_out;
-        iwp = iwp_out;
-        dei = dei_out;
-
-        p_lay = p_lay_out;
-        p_lev = p_lev_out;
-        t_lay = t_lay_out;
-        t_lev = t_lev_out;
-        gas_concs = gas_concs_out;
 
         Status::print_message("tilted path created");
         cudaEventRecord(stop, 0);
@@ -663,8 +620,6 @@ void solve_radiation(int argc, char** argv)
         // Initialize the solver.
         Status::print_message("Initializing the longwave solver.");
 
-        Gas_concs_gpu gas_concs_gpu(gas_concs);
-
         Radiation_solver_longwave rad_lw(gas_concs_gpu, "coefficients_lw.nc", "cloud_coefficients_lw.nc");
 
         // Read the boundary conditions.
@@ -719,18 +674,9 @@ void solve_radiation(int argc, char** argv)
 
         auto run_solver = [&]()
         {
-            Array_gpu<Float,2> p_lay_gpu(p_lay);
-            Array_gpu<Float,2> p_lev_gpu(p_lev);
-            Array_gpu<Float,2> t_lay_gpu(t_lay);
-            Array_gpu<Float,2> t_lev_gpu(t_lev);
             Array_gpu<Float,2> col_dry_gpu(col_dry);
             Array_gpu<Float,1> t_sfc_gpu(t_sfc);
             Array_gpu<Float,2> emis_sfc_gpu(emis_sfc);
-            Array_gpu<Float,2> lwp_gpu(lwp);
-            Array_gpu<Float,2> iwp_gpu(iwp);
-            Array_gpu<Float,2> rel_gpu(rel);
-            Array_gpu<Float,2> dei_gpu(dei);
-
 
             cudaDeviceSynchronize();
             cudaEvent_t start;
@@ -851,8 +797,6 @@ void solve_radiation(int argc, char** argv)
         // Initialize the solver.
         Status::print_message("Initializing the shortwave solver.");
 
-
-        Gas_concs_gpu gas_concs_gpu(gas_concs);
         Radiation_solver_shortwave rad_sw(gas_concs_gpu, "coefficients_sw.nc", "cloud_coefficients_sw.nc", "aerosol_optics.nc");
 
         // Read the boundary conditions.
@@ -973,10 +917,6 @@ void solve_radiation(int argc, char** argv)
 
         auto run_solver = [&]()
         {
-            Array_gpu<Float,2> p_lay_gpu(p_lay);
-            Array_gpu<Float,2> p_lev_gpu(p_lev);
-            Array_gpu<Float,2> t_lay_gpu(t_lay);
-            Array_gpu<Float,2> t_lev_gpu(t_lev);
             Array_gpu<Float,2> col_dry_gpu(col_dry);
             Array_gpu<Float,2> sfc_alb_dir_gpu(sfc_alb_dir);
             Array_gpu<Float,2> sfc_alb_dif_gpu(sfc_alb_dif);
@@ -984,13 +924,6 @@ void solve_radiation(int argc, char** argv)
             Array_gpu<Float,1> tica_scaling_gpu(tica_scaling);
             Array_gpu<Float,1> mu0_gpu(mu0);
             Array_gpu<Float,1> azi_gpu(azi);
-            Array_gpu<Float,2> lwp_gpu(lwp);
-            Array_gpu<Float,2> iwp_gpu(iwp);
-            Array_gpu<Float,2> rel_gpu(rel);
-            Array_gpu<Float,2> dei_gpu(dei);
-
-            Array_gpu<Float,2> rh_gpu(rh);
-            Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
 
             cudaDeviceSynchronize();
             cudaEvent_t start;
@@ -1028,7 +961,7 @@ void solve_radiation(int argc, char** argv)
                     mu0_gpu, azi_gpu,
                     lwp_gpu, iwp_gpu,
                     rel_gpu, dei_gpu,
-                    rh,
+                    rh_gpu,
                     aerosol_concs_gpu,
                     sw_tot_tau, sw_tot_ssa,
                     sw_cld_tau, sw_cld_ssa, sw_cld_asy,
