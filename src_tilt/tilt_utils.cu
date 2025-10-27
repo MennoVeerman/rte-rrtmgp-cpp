@@ -276,13 +276,13 @@ namespace
         {
             const int idx  = ix + iy*n_y + iz*n_y*n_x;
 
-            const Float qsat = t_lay[idx] > Float(273.16) ? qsat_liq(p_lay[idx], t_lay[idx]) : qsat_ice(p_lay[idx], t_lay[idx]);
+            const Float qsat = t_lay[idx] > Float(273.15) ? qsat_liq(p_lay[idx], t_lay[idx]) : qsat_ice(p_lay[idx], t_lay[idx]);
 
             constexpr Float eps = Float(0.62185985592);
 
             const Float q = h2o_vmr[idx] * eps / (1 + h2o_vmr[idx] * eps);
 
-            rh[idx] = q / qsat;
+            rh[idx] = min(max(Float(0.), q / qsat), Float(1.));
 
         }
     }
@@ -336,7 +336,7 @@ void tica_tilt_gpu(
     center_zh_tilt.set_dims({n_zh_tilt_center});
 
     Array<int,1> center_path_bounds({n_zh_in});
-    get_tilted_path_bounds(n_z_tilt_center, center_path.v(), center_path_bounds.v());
+    get_tilted_path_bounds(n_zh_tilt_center, center_path.v(), center_path_bounds.v());
 
     Array_gpu<ijk,1> center_path_gpu(center_path);
     Array_gpu<Float,1> center_zh_tilt_gpu(center_zh_tilt);
@@ -394,10 +394,10 @@ void tica_tilt_gpu(
         t_lay_tilt.ptr(), p_lev_tilt.ptr(),
         t_lay.ptr());
 
+    t_lay.dump("t_lay");
 
     //// tilt and compress gasses ////
     Array_gpu<Float,2> gas_tilt({n_col, n_z_tilt_center});
-    Array_gpu<Float,2> gas_new({n_col, n_z_in});
 
     for (const auto& gas_name : gas_names)
     {
@@ -406,7 +406,7 @@ void tica_tilt_gpu(
             continue;
         }
 
-        const Array_gpu<Float,2>& gas = gas_concs.get_vmr(gas_name);
+        Array_gpu<Float,2> gas(gas_concs.get_vmr(gas_name));
         if (gas.size() > 1)
         {
             if (gas.get_dims()[0] > 1)
@@ -420,9 +420,10 @@ void tica_tilt_gpu(
                         n_col_x, n_col_y, n_z_in,
                         center_path_bounds_gpu.ptr(),
                         gas_tilt.ptr(), p_lev_tilt.ptr(),
-                        gas_new.ptr());
+                        gas.ptr());
 
-                gas_concs.set_vmr(gas_name, gas_new);
+                gas_concs.set_vmr(gas_name, gas);
+
             }
             else
             {
@@ -434,7 +435,7 @@ void tica_tilt_gpu(
                         n_col_x, n_col_y, n_z_in,
                         t_lay.ptr(),
                         p_lay.ptr(),
-                        gas_new.ptr(),
+                        gas.ptr(),
                         rh.ptr());
             }
         }
@@ -443,7 +444,7 @@ void tica_tilt_gpu(
     if (switch_aerosol_optics)
     {
         Array_gpu<Float,2> aerosol_tilt({n_col, n_z_tilt_center});
-        Array_gpu<Float,2> aerosol_new({n_col, n_z_in});
+        //Array_gpu<Float,2> aerosol_new({n_col, n_z_in});
 
         for (const auto& aerosol_name : aerosol_names)
         {
@@ -452,7 +453,7 @@ void tica_tilt_gpu(
                 continue;
             }
 
-            const Array_gpu<Float,2>& aerosol = aerosol_concs.get_vmr(aerosol_name);
+            Array_gpu<Float,2> aerosol(aerosol_concs.get_vmr(aerosol_name));
             if (aerosol.size() > 1)
             {
                 if (aerosol.get_dims()[0] > 1)
@@ -466,9 +467,9 @@ void tica_tilt_gpu(
                             n_col_x, n_col_y, n_z_in,
                             center_path_bounds_gpu.ptr(),
                             aerosol_tilt.ptr(), p_lev_tilt.ptr(),
-                            aerosol_new.ptr());
+                            aerosol.ptr());
 
-                    aerosol_concs.set_vmr(aerosol_name, aerosol_new);
+                    aerosol_concs.set_vmr(aerosol_name, aerosol);
                 }
                 else
                 {

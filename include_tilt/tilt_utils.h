@@ -200,7 +200,7 @@ void tica_tilt_gpu(const Float sza, const Float azi,
     bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
     int rnd_seed);
 
-    // // esat and qsat functions taken from microHH
+    // // esat and qsat functions taken from microHH (https://github.com/microhh/microhh)
     __host__ __device__
     inline Float esat_liq(const Float T)
     {
@@ -216,28 +216,28 @@ void tica_tilt_gpu(const Float sza, const Float azi,
         constexpr Float c90  = Float(-4.8165754883E-17);
         constexpr Float c100 = Float(+1.3839187032E-18);
 
-        const Float x = min(max(Float(-75.), T-Float(273.16)), Float(50.));       // Limit the temperature range to avoid numerical errors
+        const Float x = min(max(Float(-75.), T-Float(273.15)), Float(50.));       // Limit the temperature range to avoid numerical errors
         return c00+x*(c10+x*(c20+x*(c30+x*(c40+x*(c50+x*(c60+x*(c70+x*(c80+x*(c90+x*c100)))))))));
     }
 
     __host__ __device__
     inline Float qsat_liq(const Float p, const Float T)
     {
-        constexpr Float ep = Float(0.219718);
+        constexpr Float ep = Float(0.6219718);
         return ep*esat_liq(T)/(p-(Float(1.)-ep)*esat_liq(T));
     }
 
     __host__ __device__
     inline Float esat_ice(const Float T)
     {
-        const Float x= min(max(Float(-100.), T-Float(273.16)), Float(50.));     // Limit the temperature range to avoid numerical errors
+        const Float x= min(max(Float(-100.), T-Float(273.15)), Float(50.));     // Limit the temperature range to avoid numerical errors
         return Float(611.15)*exp(Float(22.452)*x / (Float(272.55)+x));
     }
 
     __host__ __device__
     inline Float qsat_ice(const Float p, const Float T)
     {
-        constexpr Float ep = Float(0.219718);
+        constexpr Float ep = Float(0.6219718);
         return ep*esat_ice(T)/(p-(Float(1.)-ep)*esat_ice(T));
     }
 #endif

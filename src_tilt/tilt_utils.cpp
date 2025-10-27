@@ -186,7 +186,7 @@ void create_tilted_path(const std::vector<Float>& xh, const std::vector<Float>& 
     }
 }
 
-void get_tilted_path_bounds(const int n_z_tilt,
+void get_tilted_path_bounds(const int n_zh_tilt,
                 const std::vector<ijk>& tilted_path,
                 std::vector<int>& tilted_path_bounds)
 {
@@ -195,7 +195,7 @@ void get_tilted_path_bounds(const int n_z_tilt,
 
     tilted_path_bounds[ilay] = k;
 
-    for (int i=1; i < n_z_tilt; ++i)
+    for (int i=1; i < n_zh_tilt; ++i)
     {
         if (tilted_path[i].k > k)
         {
@@ -787,7 +787,7 @@ void tica_tilt(
     center_zh_tilt.set_dims({n_zh_tilt_center});
 
     Array<int,1> center_path_bounds({n_zh_in});
-    get_tilted_path_bounds(n_z_tilt_center, center_path.v(), center_path_bounds.v());
+    get_tilted_path_bounds(n_zh_tilt_center, center_path.v(), center_path_bounds.v());
 
     tilt_and_compress_fields(n_z_in, n_zh_in, n_col_x, n_col_y,
                 n_z_tilt_center, n_zh_tilt_center, n_col,
