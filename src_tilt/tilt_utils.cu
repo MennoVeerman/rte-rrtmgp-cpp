@@ -304,24 +304,6 @@ void tica_tilt_gpu(
         bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
         int rnd_seed)
 {
-
-    // TODO: move interpolation from T_lay to T_lev to input
-
-    Array<Float,2> t_lev_tmp({n_col, n_lev});
-
-    if (*std::max_element(t_lev_tmp.v().begin(), t_lev_tmp.v().end()) <= 0) {
-        for (int i = 1; i <= n_col; ++i) {
-            for (int j = 2; j <= n_lay; ++j) {
-                t_lev_tmp({i, j}) = (t_lay({i, j}) + t_lay({i, j - 1})) / 2.0;
-            }
-            t_lev_tmp({i, n_lev}) = 2 * t_lay({i, n_lay}) - t_lev_tmp({i,n_lay});
-            t_lev_tmp({i, 1}) = 2 * t_lay({i, 1}) - t_lev_tmp({i,2});
-        }
-    }
-
-    // copy interpolated values into t_lev too
-    t_lev = t_lev_tmp;
-
     ////// SETUP FOR CENTER START POINT TILTING //////
     // Finding tilted path can stay on CPU
     Array<ijk,1> center_path;
@@ -393,8 +375,6 @@ void tica_tilt_gpu(
         center_path_bounds_gpu.ptr(),
         t_lay_tilt.ptr(), p_lev_tilt.ptr(),
         t_lay.ptr());
-
-    t_lay.dump("t_lay");
 
     //// tilt and compress gasses ////
     Array_gpu<Float,2> gas_tilt({n_col, n_z_tilt_center});

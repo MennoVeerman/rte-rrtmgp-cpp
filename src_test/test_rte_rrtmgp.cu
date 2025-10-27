@@ -275,6 +275,21 @@ void solve_radiation(int argc, char** argv)
     Array<Float,2> p_lev(input_nc.get_variable<Float>("p_lev", {n_lev, n_col_y, n_col_x}), {n_col, n_lev});
     Array<Float,2> t_lev(input_nc.get_variable<Float>("t_lev", {n_lev, n_col_y, n_col_x}), {n_col, n_lev});
 
+    // If T_lev is empty but needed (e.g. LW or tilted columns), interpolate from T_lay
+    if (switch_longwave || switch_tica)
+    {
+        if (*std::max_element(t_lev.v().begin(), t_lev.v().end()) <= 0)
+        {
+            for (int i = 1; i <= n_col; ++i) {
+                for (int j = 2; j <= n_lay; ++j) {
+                    t_lev({i, j}) = (t_lay({i, j}) + t_lay({i, j - 1})) / 2.0;
+                }
+                t_lev({i, n_lev}) = 2 * t_lay({i, n_lay}) - t_lev({i,n_lay});
+                t_lev({i, 1}) = 2 * t_lay({i, 1}) - t_lev({i,2});
+            }
+        }
+    }
+
     if (input_nc.variable_exists("col_dry") && switch_tica)
     {
         std::string error = "col_dry is not supported in tica mode";

@@ -358,8 +358,21 @@ void solve_radiation(int argc, char** argv)
     Array<Float,2> p_lev(input_nc.get_variable<Float>("p_lev", {n_lev, n_col_y, n_col_x}), {n_col, n_lev});
     Array<Float,2> t_lev(input_nc.get_variable<Float>("t_lev", {n_lev, n_col_y, n_col_x}), {n_col, n_lev});
 
-    
-    
+    // If T_lev is empty but needed (e.g. LW or tilted columns), interpolate from T_lay
+    if (switch_longwave || switch_tica)
+    {
+        if (*std::max_element(t_lev.v().begin(), t_lev.v().end()) <= 0)
+        {
+            for (int i = 1; i <= n_col; ++i) {
+                for (int j = 2; j <= n_lay; ++j) {
+                    t_lev({i, j}) = (t_lay({i, j}) + t_lay({i, j - 1})) / 2.0;
+                }
+                t_lev({i, n_lev}) = 2 * t_lay({i, n_lay}) - t_lev({i,n_lay});
+                t_lev({i, 1}) = 2 * t_lay({i, 1}) - t_lev({i,2});
+            }
+        }
+    }
+
     if (input_nc.variable_exists("col_dry") && switch_tica)
     {
         std::string error = "col_dry is not supported in tica mode";
@@ -472,6 +485,19 @@ void solve_radiation(int argc, char** argv)
     bool do_tilting = false;
     if (switch_tica && mu0.v()[0] > 0.087)     // mu0 = 0.087 roughly corresponds to a sza of 85 degrees
         do_tilting = true;
+
+    Array_gpu<Float,2> p_lay_gpu(p_lay);
+    Array_gpu<Float,2> p_lev_gpu(p_lev);
+    Array_gpu<Float,2> t_lay_gpu(t_lay);
+    Array_gpu<Float,2> t_lev_gpu(t_lev);
+    Array_gpu<Float,2> lwp_gpu(lwp);
+    Array_gpu<Float,2> iwp_gpu(iwp);
+    Array_gpu<Float,2> rel_gpu(rel);
+    Array_gpu<Float,2> dei_gpu(dei);
+    Array_gpu<Float,2> rh_gpu(rh);
+
+    Gas_concs_gpu gas_concs_gpu(gas_concs);
+    Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
 
     if (do_tilting)
     {

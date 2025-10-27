@@ -763,19 +763,6 @@ void tica_tilt(
         int rnd_seed
 )
 {
-    // if t lev all 0, interpolate from t lay
-    if (*std::max_element(t_lev_out.v().begin(), t_lev_out.v().end()) <= 0) {
-        for (int i = 1; i <= n_col; ++i) {
-            for (int j = 2; j <= n_lay; ++j) {
-                t_lev_out({i, j}) = (t_lay_out({i, j}) + t_lay_out({i, j - 1})) / 2.0;
-            }
-            t_lev_out({i, n_lev}) = 2 * t_lay_out({i, n_lay}) - t_lev_out({i,n_lay});
-            t_lev_out({i, 1}) = 2 * t_lay_out({i, 1}) - t_lev_out({i,2});
-        }
-    }
-    // copy interpolated values into t_lev too
-    t_lev = t_lev_out;
-
     ////// SETUP FOR CENTER START POINT TILTING //////
     Array<ijk,1> center_path;
     Array<Float,1> center_zh_tilt;
