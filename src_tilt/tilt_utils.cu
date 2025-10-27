@@ -437,7 +437,8 @@ void tica_tilt_gpu(
             if (aerosol.size() > 1)
             {
                 if (aerosol.get_dims()[0] > 1)
-                { // checking: do we have 3D field?
+                {
+                    //  Only tilt if we have a 3D aerosol field
                     tilt_layers_gpu<<<grid_3d_2, block_3d_2>>>(
                             n_col_x, n_col_y, n_z_tilt_center,
                             center_path_gpu.ptr(),
@@ -450,10 +451,6 @@ void tica_tilt_gpu(
                             aerosol.ptr());
 
                     aerosol_concs.set_vmr(aerosol_name, aerosol);
-                }
-                else
-                {
-                    throw std::runtime_error("No tilted column implementation for single column profiles.");
                 }
             }
         }
