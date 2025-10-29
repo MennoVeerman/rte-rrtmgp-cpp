@@ -205,7 +205,7 @@ void tica_tilt_gpu(const Float sza, const Float azi,
 void tica_reverse_gpu(
         const int n_col_x, const int n_col_y, const int n_lay, const int n_lev,
         const int n_z, const int n_z_in, const int n_zh_in ,
-        const bool do_tilting, const bool switch_twostream, const bool switch_raytracing,
+        const bool switch_twostream, const bool switch_raytracing,
         const Array_gpu<Float,1>& zh, const Array_gpu<Float,1>& zh_tilt,
         const Array_gpu<ijk,1>& tilted_path, const Array_gpu<int,1>& tilted_path_bounds,
         const Array_gpu<Float,1>& p_lev_tilt,

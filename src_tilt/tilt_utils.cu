@@ -647,7 +647,7 @@ void tica_tilt_gpu(
 void tica_reverse_gpu(
         const int n_col_x, const int n_col_y, const int n_lay, const int n_lev,
         const int n_z, const int n_z_in, const int n_zh_in ,
-        const bool do_tilting, const bool switch_twostream, const bool switch_raytracing,
+        const bool switch_twostream, const bool switch_raytracing,
         const Array_gpu<Float,1>& zh, const Array_gpu<Float,1>& zh_tilt,
         const Array_gpu<ijk,1>& tilted_path, const Array_gpu<int,1>& tilted_path_bounds,
         const Array_gpu<Float,1>& p_lev_tilt,
@@ -679,146 +679,63 @@ void tica_reverse_gpu(
     dim3 grid_2d(grid_col_x, grid_col_y, 1);
     dim3 block_2d(block_col_x, block_col_y, 1);
 
-    if (do_tilting)
+
+    if (switch_twostream)
     {
-        if (switch_twostream)
-        {
-            sw_flux_dn.set_dims({n_col, n_lev});
-            sw_flux_dn_dir.set_dims({n_col, n_lev});
-            sw_flux_up.set_dims({n_col, n_lev});
-            sw_flux_net.set_dims({n_col, n_lev});
+        sw_flux_dn.set_dims({n_col, n_lev});
+        sw_flux_dn_dir.set_dims({n_col, n_lev});
+        sw_flux_up.set_dims({n_col, n_lev});
+        sw_flux_net.set_dims({n_col, n_lev});
 
-            translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_z_in, n_lev,
-                    tilted_path.ptr(), tilted_path_bounds.ptr(),
-                    sw_flux_dn_tilt.ptr(), sw_flux_dn.ptr());
-            translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_z_in, n_lev,
-                    tilted_path.ptr(), tilted_path_bounds.ptr(),
-                    sw_flux_dn_dir_tilt.ptr(), sw_flux_dn_dir.ptr());
-            translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_z_in, n_lev,
-                    tilted_path.ptr(), tilted_path_bounds.ptr(),
-                    sw_flux_up_tilt.ptr(), sw_flux_up.ptr());
-            translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_z_in, n_lev,
-                    tilted_path.ptr(), tilted_path_bounds.ptr(),
-                    sw_flux_net_tilt.ptr(), sw_flux_net.ptr());
-        }
-
-        if (switch_raytracing)
-        {
-            rt_flux_abs_dir.set_dims({n_col_x, n_col_y, n_z});
-            rt_flux_abs_dif.set_dims({n_col_x, n_col_y, n_z});
-            rt_flux_tod_up.set_dims({n_col_x, n_col_y});
-
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col_x, n_col_y, n_z, rt_flux_abs_dir.ptr());
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col_x, n_col_y, n_z, rt_flux_abs_dif.ptr());
-
-            translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
-                    n_col_x, n_col_y, n_z_in, n_z,
-                    tilted_path.ptr(),
-                    tilted_path_bounds.ptr(),
-                    p_lev_tilt.ptr(),
-                    rt_flux_abs_dir_tilt.ptr(),
-                    rt_flux_abs_dir.ptr());
-
-            translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
-                    n_col_x, n_col_y, n_z_in, n_z,
-                    tilted_path.ptr(),
-                    tilted_path_bounds.ptr(),
-                    p_lev_tilt.ptr(),
-                    rt_flux_abs_dif_tilt.ptr(),
-                    rt_flux_abs_dif.ptr());
-
-            translate_toa_flux_gpu<<<grid_2d, block_2d>>>(
-                    n_col_x, n_col_y, n_zh_tilted,
-                    tilted_path.ptr(),
-                    tilted_path_bounds.ptr(),
-                    rt_flux_tod_up_tilt.ptr(),
-                    rt_flux_tod_up.ptr());
-        }
+        translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+                n_col_x, n_col_y, n_z_in, n_lev,
+                tilted_path.ptr(), tilted_path_bounds.ptr(),
+                sw_flux_dn_tilt.ptr(), sw_flux_dn.ptr());
+        translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+                n_col_x, n_col_y, n_z_in, n_lev,
+                tilted_path.ptr(), tilted_path_bounds.ptr(),
+                sw_flux_dn_dir_tilt.ptr(), sw_flux_dn_dir.ptr());
+        translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+                n_col_x, n_col_y, n_z_in, n_lev,
+                tilted_path.ptr(), tilted_path_bounds.ptr(),
+                sw_flux_up_tilt.ptr(), sw_flux_up.ptr());
+        translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+                n_col_x, n_col_y, n_z_in, n_lev,
+                tilted_path.ptr(), tilted_path_bounds.ptr(),
+                sw_flux_net_tilt.ptr(), sw_flux_net.ptr());
     }
-    else
+
+    if (switch_raytracing)
     {
-        Array_gpu<Float,1> mean_profile({n_lev});
-        const Float n_col_inv = Float(1.) / (n_col_x * n_col_y);
+        rt_flux_abs_dir.set_dims({n_col_x, n_col_y, n_z});
+        rt_flux_abs_dif.set_dims({n_col_x, n_col_y, n_z});
+        rt_flux_tod_up.set_dims({n_col_x, n_col_y});
 
-        if (switch_twostream)
-        {
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
+        Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col_x, n_col_y, n_z, rt_flux_abs_dir.ptr());
+        Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col_x, n_col_y, n_z, rt_flux_abs_dif.ptr());
 
-            tica_mean_profile<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_lev, n_col_inv,
-                    sw_flux_dn_tilt.ptr(), mean_profile.ptr());
+        translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
+                n_col_x, n_col_y, n_z_in, n_z,
+                tilted_path.ptr(),
+                tilted_path_bounds.ptr(),
+                p_lev_tilt.ptr(),
+                rt_flux_abs_dir_tilt.ptr(),
+                rt_flux_abs_dir.ptr());
 
-            tica_profile_to_3d<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_lev, n_col_inv,
-                    mean_profile.ptr(), sw_flux_dn.ptr());
+        translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
+                n_col_x, n_col_y, n_z_in, n_z,
+                tilted_path.ptr(),
+                tilted_path_bounds.ptr(),
+                p_lev_tilt.ptr(),
+                rt_flux_abs_dif_tilt.ptr(),
+                rt_flux_abs_dif.ptr());
 
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
-
-            tica_mean_profile<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_lev, n_col_inv,
-                    sw_flux_dn_dir_tilt.ptr(), mean_profile.ptr());
-
-            tica_profile_to_3d<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_lev, n_col_inv,
-                    mean_profile.ptr(), sw_flux_dn_dir.ptr());
-
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
-
-            tica_mean_profile<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_lev, n_col_inv,
-                    sw_flux_up_tilt.ptr(), mean_profile.ptr());
-
-            tica_profile_to_3d<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_lev, n_col_inv,
-                    mean_profile.ptr(), sw_flux_up.ptr());
-
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
-
-            tica_mean_profile<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_lev, n_col_inv,
-                    sw_flux_net.ptr(), mean_profile.ptr());
-
-            tica_profile_to_3d<<<grid_3d_lev, block_3d_lev>>>(
-                    n_col_x, n_col_y, n_lev, n_col_inv,
-                    mean_profile.ptr(), sw_flux_net.ptr());
-        }
-        if (switch_raytracing)
-        {
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
-
-            tica_mean_profile<<<grid_3d_z, block_3d_z>>>(
-                    n_col_x, n_col_y, n_z, n_col_inv,
-                    rt_flux_abs_dir.ptr(), mean_profile.ptr());
-
-            tica_profile_to_3d<<<grid_3d_z, block_3d_z>>>(
-                    n_col_x, n_col_y, n_z, n_col_inv,
-                    mean_profile.ptr(), rt_flux_abs_dir.ptr());
-
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
-
-            tica_mean_profile<<<grid_3d_z, block_3d_z>>>(
-                    n_col_x, n_col_y, n_z, n_col_inv,
-                    rt_flux_abs_dif.ptr(), mean_profile.ptr());
-
-            tica_profile_to_3d<<<grid_3d_z, block_3d_z>>>(
-                    n_col_x, n_col_y, n_z, n_col_inv,
-                    mean_profile.ptr(), rt_flux_abs_dif.ptr());
-
-
-            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
-
-            tica_mean_profile<<<grid_2d, block_2d>>>(
-                    n_col_x, n_col_y, 1, n_col_inv,
-                    rt_flux_tod_up.ptr(), mean_profile.ptr());
-
-            tica_profile_to_3d<<<grid_2d, block_2d>>>(
-                    n_col_x, n_col_y, 1, n_col_inv,
-                    mean_profile.ptr(), rt_flux_tod_up.ptr());
-        }
+        translate_toa_flux_gpu<<<grid_2d, block_2d>>>(
+                n_col_x, n_col_y, n_zh_tilted,
+                tilted_path.ptr(),
+                tilted_path_bounds.ptr(),
+                rt_flux_tod_up_tilt.ptr(),
+                rt_flux_tod_up.ptr());
     }
 }
 

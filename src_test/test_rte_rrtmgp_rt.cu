@@ -484,10 +484,6 @@ void solve_radiation(int argc, char** argv)
     mu0 = input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x});
     azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
 
-    bool do_tilting = false;
-    if (switch_tica && mu0.v()[0] > 0.087)     // mu0 = 0.087 roughly corresponds to a sza of 85 degrees
-        do_tilting = true;
-
     Array_gpu<Float,2> p_lay_gpu(p_lay);
     Array_gpu<Float,2> p_lev_gpu(p_lev);
     Array_gpu<Float,2> t_lay_gpu(t_lay);
@@ -506,7 +502,7 @@ void solve_radiation(int argc, char** argv)
 
     Array_gpu<Float,1> p_lev_tilt_gpu;
 
-    if (do_tilting)
+    if (switch_tica)
     {
         cudaDeviceSynchronize();
         cudaEvent_t start;
@@ -843,7 +839,7 @@ void solve_radiation(int argc, char** argv)
         }
 
         Array<Float,1> tica_scaling({n_col});
-        if (do_tilting)
+        if (switch_tica)
         {
             for (int icol=1; icol<=n_col; ++icol)
             {
@@ -955,7 +951,7 @@ void solve_radiation(int argc, char** argv)
                     switch_single_gpt,
                     switch_delta_cloud,
                     switch_delta_aerosol,
-                    do_tilting,
+                    switch_tica,
                     single_gpt,
                     photons_per_pixel,
                     grid_cells,
@@ -1052,7 +1048,7 @@ void solve_radiation(int argc, char** argv)
 
             tica_reverse_gpu(
                 n_col_x, n_col_y, n_lay, n_lev, n_z, n_z_in, n_zh_in,
-                do_tilting, switch_twostream, switch_raytracing,
+                switch_twostream, switch_raytracing,
                 grid_zh_gpu, center_zh_tilt_gpu,
                 center_path_gpu, center_path_bounds_gpu,
                 p_lev_tilt_gpu,
