@@ -192,13 +192,29 @@ void tica_tilt_simple(const int n_col_x, const int n_col_y, const int n_col,
 void tica_tilt_gpu(const Float sza, const Float azi,
     const int n_col_x, const int n_col_y, const int n_col,
     const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in ,
-    Array<Float,1>& xh, Array<Float,1>& yh, Array<Float,1>& zh, Array<Float,1>& z,
+    const Array_gpu<Float,1>& z, const Array_gpu<Float,1>& zh,
     Array_gpu<Float,2>& p_lay, Array_gpu<Float,2>& t_lay, Array_gpu<Float,2>& p_lev, Array_gpu<Float,2>& t_lev,
     Array_gpu<Float,2>& lwp, Array_gpu<Float,2>& iwp, Array_gpu<Float,2>& rel, Array_gpu<Float,2>& dei, Array_gpu<Float,2>& rh,
+    const Array_gpu<ijk,1>& tilted_path, const Array_gpu<int,1>& tilted_path_bounds,
+    const Array_gpu<Float,1>& zh_tilt, Array_gpu<Float,1>& p_lev_tilt,
     Gas_concs_gpu& gas_concs, Aerosol_concs_gpu& aerosol_concs,
     std::vector<std::string>& gas_names, std::vector<std::string>& aerosol_names,
     bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
     int rnd_seed);
+
+void tica_reverse_gpu(
+        const int n_col_x, const int n_col_y, const int n_lay, const int n_lev,
+        const int n_z, const int n_z_in, const int n_zh_in ,
+        const bool do_tilting, const bool switch_twostream, const bool switch_raytracing,
+        const Array_gpu<Float,1>& zh, const Array_gpu<Float,1>& zh_tilt,
+        const Array_gpu<ijk,1>& tilted_path, const Array_gpu<int,1>& tilted_path_bounds,
+        const Array_gpu<Float,1>& p_lev_tilt,
+        const Array_gpu<Float,2>& sw_flux_dn_tilt, const Array_gpu<Float,2>& sw_flux_dn_dir_tilt,
+        const Array_gpu<Float,2>& sw_flux_up_tilt, const Array_gpu<Float,2>& sw_flux_net_tilt,
+        const Array_gpu<Float,3>& rt_flux_abs_dir_tilt, const Array_gpu<Float,3>& rt_flux_abs_dif_tilt, const Array_gpu<Float,2>& rt_flux_tod_up_tilt,
+        Array_gpu<Float,2>& sw_flux_dn, Array_gpu<Float,2>& sw_flux_dn_dir,
+        Array_gpu<Float,2>& sw_flux_up, Array_gpu<Float,2>& sw_flux_net,
+        Array_gpu<Float,3>& rt_flux_abs_dir, Array_gpu<Float,3>& rt_flux_abs_dif, Array_gpu<Float,2>& rt_flux_tod_up);
 
     // // esat and qsat functions taken from microHH (https://github.com/microhh/microhh)
     __host__ __device__

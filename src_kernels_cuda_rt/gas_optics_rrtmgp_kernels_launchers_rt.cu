@@ -123,6 +123,19 @@ namespace Gas_optics_rrtmgp_kernels_cuda_rt
 
     }
 
+    void zero_array(const int ni, Float* arr)
+    {
+        const int block_i = 32;
+
+        const int grid_i = ni/block_i + (ni%block_i > 0);
+
+        dim3 grid_gpu(grid_i);
+        dim3 block_gpu(block_i);
+
+        zero_array_kernel<<<grid_gpu, block_gpu>>>(
+                ni, arr);
+    }
+
     void zero_array(const int ni, int* arr)
     {
         const int block_i = 32;

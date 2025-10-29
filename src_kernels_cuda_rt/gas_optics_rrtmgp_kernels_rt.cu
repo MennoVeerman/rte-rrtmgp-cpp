@@ -160,6 +160,20 @@ void zero_array_kernel(
 __global__
 void zero_array_kernel(
         const int ni,
+        Float* __restrict__ arr)
+{
+    const int ii = blockIdx.x*blockDim.x + threadIdx.x;
+
+    if ( (ii < ni) )
+    {
+        const int idx = ii;
+        arr[idx] = Float(0.);
+    }
+}
+
+__global__
+void zero_array_kernel(
+        const int ni,
         int* __restrict__ arr)
 {
     const int ii = blockIdx.x*blockDim.x + threadIdx.x;

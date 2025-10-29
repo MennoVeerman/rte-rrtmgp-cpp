@@ -345,6 +345,7 @@ void solve_radiation(int argc, char** argv)
     Array<Float,1> grid_y(input_nc.get_variable<Float>("y", {n_col_y}), {n_col_y});
     Array<Float,1> grid_yh(input_nc.get_variable<Float>("yh", {n_col_y+1}), {n_col_y+1});
     Array<Float,1> grid_z(input_nc.get_variable<Float>("z", {n_z_in}), {n_z_in});
+    Array<Float,1> grid_zh(input_nc.get_variable<Float>("zh", {n_zh_in}), {n_zh_in});
 
     const Vector<int> grid_cells = {n_col_x, n_col_y, n_z};
     const Vector<Float> grid_d = {grid_xh({2}) - grid_xh({1}), grid_yh({2}) - grid_yh({1}), grid_z({2}) - grid_z({1})};
@@ -475,9 +476,10 @@ void solve_radiation(int argc, char** argv)
 
     Float tica_sza;
     Float tica_azi;
-    Array<ijk,1> center_path;
-    Array<Float,1> center_zh_tilt;
-    Array<Float,1> zh;
+
+    Array_gpu<ijk,1> center_path_gpu;
+    Array_gpu<int,1> center_path_bounds_gpu;
+    Array_gpu<Float,1> center_zh_tilt_gpu;
 
     mu0 = input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x});
     azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
@@ -496,8 +498,13 @@ void solve_radiation(int argc, char** argv)
     Array_gpu<Float,2> dei_gpu(dei);
     Array_gpu<Float,2> rh_gpu(rh);
 
+    Array_gpu<Float,1> grid_z_gpu(grid_z);
+    Array_gpu<Float,1> grid_zh_gpu(grid_zh);
+
     Gas_concs_gpu gas_concs_gpu(gas_concs);
     Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
+
+    Array_gpu<Float,1> p_lev_tilt_gpu;
 
     if (do_tilting)
     {
@@ -521,22 +528,23 @@ void solve_radiation(int argc, char** argv)
             "aermr08", "aermr09", "aermr10","aermr11"
         };
 
-        Array<Float,1> xh;
-        Array<Float,1> yh;
-        Array<Float,1> z;
+        Array<ijk,1> center_path;
+        Array<int,1> center_path_bounds({n_zh_in});
+        Array<Float,1> center_zh_tilt;
 
-        xh.set_dims({n_col_x+1});
-        xh = std::move(input_nc.get_variable<Float>("xh", {n_col_x+1}));
-        yh.set_dims({n_col_y+1});
-        yh = std::move(input_nc.get_variable<Float>("yh", {n_col_y+1}));
+        create_tilted_path(grid_xh.v(),grid_yh.v(),grid_zh.v(),grid_z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
 
-        zh.set_dims({n_zh_in});
-        zh = std::move(input_nc.get_variable<Float>("zh", {n_zh_in}));
-        z.set_dims({n_z_in});
-        z = std::move(input_nc.get_variable<Float>("z", {n_z_in}));
+        int n_zh_tilt_center = center_zh_tilt.v().size();
+        center_path.set_dims({n_zh_tilt_center});
+        center_zh_tilt.set_dims({n_zh_tilt_center});
 
-        create_tilted_path(xh.v(),yh.v(),zh.v(),z.v(),tica_sza, tica_azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
-        int n_z_tilt_center = center_zh_tilt.v().size() - 1;
+        get_tilted_path_bounds(n_zh_tilt_center, center_path.v(), center_path_bounds.v());
+
+        center_path_gpu = center_path;
+        center_path_bounds_gpu = center_path_bounds;
+        center_zh_tilt_gpu = center_zh_tilt;
+
+        p_lev_tilt_gpu.set_dims({n_zh_tilt_center});
 
         for (int icol=1; icol<=n_col; ++icol)
         {
@@ -548,9 +556,11 @@ void solve_radiation(int argc, char** argv)
                 tica_sza, tica_azi,
                 n_col_x, n_col_y, n_col,
                 n_lay, n_lev, n_z_in, n_zh_in,
-                xh, yh, zh, z,
+                grid_z_gpu, grid_zh_gpu,
                 p_lay_gpu, t_lay_gpu, p_lev_gpu, t_lev_gpu,
                 lwp_gpu, iwp_gpu, rel_gpu, dei_gpu, rh_gpu,
+                center_path_gpu, center_path_bounds_gpu,
+                center_zh_tilt_gpu, p_lev_tilt_gpu,
                 gas_concs_gpu, aerosol_concs_gpu,
                 gas_names, aerosol_names,
                 switch_cloud_optics, switch_liq_cloud_optics, switch_ice_cloud_optics, switch_aerosol_optics,
@@ -567,7 +577,7 @@ void solve_radiation(int argc, char** argv)
         cudaEventDestroy(stop);
 
         Status::print_message("Duration tilting: " + std::to_string(duration) + " (ms)");
-        Status::print_message("number of levels in tilted column: " + std::to_string(n_z_tilt_center));
+        Status::print_message("number of levels in tilted column: " + std::to_string(n_zh_tilt_center));
     }
 
 
@@ -1010,65 +1020,67 @@ void solve_radiation(int argc, char** argv)
         Array<Float,2> sw_aer_ssa_cpu(sw_aer_ssa);
         Array<Float,2> sw_aer_asy_cpu(sw_aer_asy);
 
-        Array<Float,2> sw_flux_up_cpu(sw_flux_up);
-        Array<Float,2> sw_flux_dn_cpu(sw_flux_dn);
-        Array<Float,2> sw_flux_dn_dir_cpu(sw_flux_dn_dir);
-        Array<Float,2> sw_flux_net_cpu(sw_flux_net);
+        Array<Float,2> sw_flux_up_cpu;
+        Array<Float,2> sw_flux_dn_cpu;
+        Array<Float,2> sw_flux_dn_dir_cpu;
+        Array<Float,2> sw_flux_net_cpu;
+
         Array<Float,2> sw_gpt_flux_up_cpu(sw_gpt_flux_up);
         Array<Float,2> sw_gpt_flux_dn_cpu(sw_gpt_flux_dn);
         Array<Float,2> sw_gpt_flux_dn_dir_cpu(sw_gpt_flux_dn_dir);
         Array<Float,2> sw_gpt_flux_net_cpu(sw_gpt_flux_net);
 
-        Array<Float,2> rt_flux_tod_up_cpu(rt_flux_tod_up);
         Array<Float,2> rt_flux_sfc_dir_cpu(rt_flux_sfc_dir);
         Array<Float,2> rt_flux_sfc_dif_cpu(rt_flux_sfc_dif);
         Array<Float,2> rt_flux_sfc_up_cpu(rt_flux_sfc_up);
-        Array<Float,3> rt_flux_abs_dir_cpu(rt_flux_abs_dir);
-        Array<Float,3> rt_flux_abs_dif_cpu(rt_flux_abs_dif);
+
+        Array<Float,2> rt_flux_tod_up_cpu;
+        Array<Float,3> rt_flux_abs_dir_cpu;
+        Array<Float,3> rt_flux_abs_dif_cpu;
 
         if (switch_tica)
         {
             // tilt back results or homogenize in case of high sza (> 85 degrees)
-            if (do_tilting)
-            {
-                // sw_flux_dn
-                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_cpu);
+            Array_gpu<Float,2> sw_flux_dn_reversed;
+            Array_gpu<Float,2> sw_flux_dn_dir_reversed;
+            Array_gpu<Float,2> sw_flux_up_reversed;
+            Array_gpu<Float,2> sw_flux_net_reversed;
 
-                // sw_flux_dn_dir
-                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_dn_dir_cpu);
+            Array_gpu<Float,3> rt_flux_abs_dir_reversed;
+            Array_gpu<Float,3> rt_flux_abs_dif_reversed;
+            Array_gpu<Float,2> rt_flux_tod_up_reversed;
 
-                // sw_flux_up
-                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_up_cpu);
+            tica_reverse_gpu(
+                n_col_x, n_col_y, n_lay, n_lev, n_z, n_z_in, n_zh_in,
+                do_tilting, switch_twostream, switch_raytracing,
+                grid_zh_gpu, center_zh_tilt_gpu,
+                center_path_gpu, center_path_bounds_gpu,
+                p_lev_tilt_gpu,
+                sw_flux_dn, sw_flux_dn_dir, sw_flux_up, sw_flux_net,
+                rt_flux_abs_dir, rt_flux_abs_dif, rt_flux_tod_up,
+                sw_flux_dn_reversed, sw_flux_dn_dir_reversed, sw_flux_up_reversed, sw_flux_net_reversed,
+                rt_flux_abs_dir_reversed, rt_flux_abs_dif_reversed, rt_flux_tod_up_reversed);
 
-                // sw_flux_net
-                translate_fluxes(n_col_x, n_col_y, n_lev, center_zh_tilt, zh, center_path.v(), sw_flux_net_cpu);
+            sw_flux_dn_cpu = sw_flux_dn_reversed;
+            sw_flux_dn_dir_cpu = sw_flux_dn_dir_reversed;
+            sw_flux_up_cpu = sw_flux_up_reversed;
+            sw_flux_net_cpu = sw_flux_net_reversed;
 
-                // rt_flux_abs_dir
-                translate_heating(n_col_x, n_col_y, n_z, center_zh_tilt, zh, center_path.v(), rt_flux_abs_dir_cpu);
-
-                // rt_flux_abs_dif
-                translate_heating(n_col_x, n_col_y, n_z, center_zh_tilt, zh, center_path.v(), rt_flux_abs_dif_cpu);
-
-                // rt_flux_tod_up
-                translate_top(n_col_x, n_col_y, center_zh_tilt, center_path.v(), rt_flux_tod_up_cpu);
-
-            }
-            else
-            {
-                tica_mean(sw_flux_dn_cpu, n_col_x, n_col_y, n_lev);
-                tica_mean(sw_flux_dn_dir_cpu, n_col_x, n_col_y, n_lev);
-                tica_mean(sw_flux_up_cpu, n_col_x, n_col_y, n_lev);
-                tica_mean(sw_flux_net_cpu, n_col_x, n_col_y, n_lev);
-
-                tica_mean(rt_flux_abs_dir_cpu, n_col_x, n_col_y, n_z);
-                tica_mean(rt_flux_abs_dif_cpu, n_col_x, n_col_y, n_z);
-                tica_mean(rt_flux_tod_up_cpu, n_col_x, n_col_y, 1);
-                tica_mean(rt_flux_sfc_dir_cpu, n_col_x, n_col_y, 1);
-                tica_mean(rt_flux_sfc_dif_cpu, n_col_x, n_col_y, 1);
-                tica_mean(rt_flux_sfc_up_cpu, n_col_x, n_col_y, 1);
-            }
+            rt_flux_tod_up_cpu = rt_flux_tod_up_reversed;
+            rt_flux_abs_dir_cpu = rt_flux_abs_dir_reversed;
+            rt_flux_abs_dif_cpu = rt_flux_abs_dif_reversed;
         }
+        else
+        {
+            sw_flux_dn_cpu = sw_flux_dn;
+            sw_flux_dn_dir_cpu = sw_flux_dn_dir;
+            sw_flux_up_cpu = sw_flux_up;
+            sw_flux_net_cpu = sw_flux_net;
 
+            rt_flux_tod_up_cpu = rt_flux_tod_up;
+            rt_flux_abs_dir_cpu = rt_flux_abs_dir;
+            rt_flux_abs_dif_cpu = rt_flux_abs_dif;
+        }
         output_nc.add_dimension("gpt_sw", n_gpt_sw);
         output_nc.add_dimension("band_sw", n_bnd_sw);
 

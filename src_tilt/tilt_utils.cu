@@ -15,6 +15,7 @@
 #include "tilt_utils.h"
 #include "types.h"
 
+#include "gas_optics_rrtmgp_kernels_cuda_rt.h"
 
 namespace
 {
@@ -98,7 +99,7 @@ namespace
 
 
     __global__
-    void tilt_plev_gpu(const int n_x, const int n_y, const int n_z, const int n_z_tilt,
+    void tilt_plev_gpu(const int n_x, const int n_y, const int n_z, const int n_z_tilted,
                        const ijk* tilted_path,
                        const Float* zh_tilt,
                        const Float* z, const Float* zh,
@@ -107,7 +108,7 @@ namespace
     {
         const int i = blockIdx.x*blockDim.x + threadIdx.x;
 
-        if ( (i < (n_z_tilt+1) ) )
+        if ( (i < (n_z_tilted+1) ) )
         {
             const Float pos_z = zh_tilt[i];
             const Float p = interpolate_gpu(n_x, n_y, n_z, z, zh, p_lay, p_lev, 0, 0, pos_z, tilted_path[i]);
@@ -116,7 +117,7 @@ namespace
     }
 
     __global__
-    void tilt_tlay_gpu(const int n_x, const int n_y, const int n_z, const int n_z_tilt,
+    void tilt_tlay_gpu(const int n_x, const int n_y, const int n_z, const int n_z_tilted,
                        const ijk* tilted_path,
                        const Float* z_tilt,
                        const Float* z, const Float* zh,
@@ -127,7 +128,7 @@ namespace
         const int j = blockIdx.y*blockDim.y + threadIdx.y;
         const int k = blockIdx.z*blockDim.z + threadIdx.z;
 
-        if ( (i < n_x) && (j< n_y) && (k < n_z_tilt) )
+        if ( (i < n_x) && (j< n_y) && (k < n_z_tilted) )
         {
             const int idx  = i + j*n_y + k*n_y*n_x;
             const Float pos_z = (z_tilt[k] + z_tilt[k+1])/Float(2.);
@@ -262,6 +263,171 @@ namespace
     }
 
     __global__
+    void translate_twostream_fluxes_gpu(const int n_x, const int n_y, const int n_z, const int n_lev_in,
+                          const ijk* tilted_path,
+                          const int* tilted_path_bounds,
+                          const Float* flux_in,
+                          Float* flux_out)
+    {
+        const int ix = blockIdx.x*blockDim.x + threadIdx.x;
+        const int iy = blockIdx.y*blockDim.y + threadIdx.y;
+        const int iz = blockIdx.z*blockDim.z + threadIdx.z;
+
+        if ( ( ix < n_x) && ( iy < n_y) && (iz < n_z) )
+        {
+            const int i_tilt = tilted_path_bounds[iz];
+            const ijk offset = tilted_path[i_tilt];
+
+            const int idx_out = ix + iy * n_x + iz * n_y * n_x;
+            const int modulo_x = ix - offset.i < 0 ? (ix - offset.i)% n_x + n_x: (ix - offset.i)% n_x;
+            const int modulo_y = iy - offset.j < 0 ? (iy - offset.j)% n_y + n_y: (iy - offset.j)% n_y;
+            const int idx_in = modulo_x + modulo_y * n_x + iz * n_y * n_x;
+            flux_out[idx_out] = flux_in[idx_in];
+        }
+        else if ( ( ix < n_x) && ( iy < n_y) && (iz < n_lev_in) )
+        {
+            const int i_tilt = tilted_path_bounds[n_z];
+            const ijk offset_tod = tilted_path[i_tilt];
+            const int idx_out = ix + iy * n_x + iz * n_y * n_x;
+            const int modulo_x = ix - offset_tod.i < 0 ? (ix - offset_tod.i)% n_x + n_x: (ix - offset_tod.i)% n_x;
+            const int modulo_y = iy - offset_tod.j < 0 ? (iy - offset_tod.j)% n_y + n_y: (iy - offset_tod.j)% n_y;
+            const int idx_in = modulo_x + modulo_y * n_x + iz * n_y * n_x;
+            flux_out[idx_out] = flux_in[idx_in];
+        }
+    }
+
+
+    __global__
+    void translate_absorption_gpu(const int n_x, const int n_y,
+                          const int n_z_in, const int n_z,
+                          const ijk* tilted_path,
+                          const int* tilted_path_bounds,
+                          const Float* p_lev_tilt,
+                          const Float* abs_in,
+                          Float* abs_out)
+    {
+        const int ix = blockIdx.x*blockDim.x + threadIdx.x;
+        const int iy = blockIdx.y*blockDim.y + threadIdx.y;
+        const int iz = blockIdx.z*blockDim.z + threadIdx.z;
+
+        if ( ( ix < n_x) && ( iy < n_y) && (iz < n_z) )
+        {
+            if (iz < n_z_in)
+            {
+                const int i_tilt_lwr = tilted_path_bounds[iz];
+                const int i_tilt_upr = tilted_path_bounds[iz+1];
+                const Float dp_total = p_lev_tilt[i_tilt_lwr] - p_lev_tilt[i_tilt_upr];
+
+                for (int i_tilt = i_tilt_lwr; i_tilt < i_tilt_upr; ++i_tilt)
+                {
+                    const Float dp_local = p_lev_tilt[i_tilt] - p_lev_tilt[i_tilt + 1];
+
+                    const ijk offset = tilted_path[i_tilt];
+
+                    const int idx_out = ix + iy * n_x + iz * n_y * n_x;
+                    const int modulo_x = ix - offset.i < 0 ? (ix - offset.i)% n_x + n_x: (ix - offset.i)% n_x;
+                    const int modulo_y = iy - offset.j < 0 ? (iy - offset.j)% n_y + n_y: (iy - offset.j)% n_y;
+                    const int idx_in = modulo_x + modulo_y * n_x + iz * n_y * n_x;
+                    abs_out[idx_out] += abs_in[idx_in] * dp_local / dp_total;
+                }
+            }
+            else
+            {
+                const int i_tilt = tilted_path_bounds[n_z_in];
+                const ijk offset = tilted_path[i_tilt];
+
+                const int idx_out = ix + iy * n_x + iz * n_y * n_x;
+                const int modulo_x = ix - offset.i < 0 ? (ix - offset.i)% n_x + n_x: (ix - offset.i)% n_x;
+                const int modulo_y = iy - offset.j < 0 ? (iy - offset.j)% n_y + n_y: (iy - offset.j)% n_y;
+                const int idx_in = modulo_x + modulo_y * n_x + iz * n_y * n_x;
+                abs_out[idx_out] += abs_in[idx_in];
+
+
+            }
+        }
+    }
+
+    __global__
+    void translate_toa_flux_gpu(const int n_x, const int n_y,
+                          const int n_zh_tilt,
+                          const ijk* tilted_path,
+                          const int* tilted_path_bounds,
+                          const Float* abs_in,
+                          Float* abs_out)
+    {
+        const int ix = blockIdx.x*blockDim.x + threadIdx.x;
+        const int iy = blockIdx.y*blockDim.y + threadIdx.y;
+
+        if ( ( ix < n_x) && ( iy < n_y) )
+        {
+            const ijk offset = tilted_path[n_zh_tilt-1];
+
+            const int idx_out = ix + iy * n_x;
+            const int modulo_x = ix - offset.i < 0 ? (ix - offset.i)% n_x + n_x: (ix - offset.i)% n_x;
+            const int modulo_y = iy - offset.j < 0 ? (iy - offset.j)% n_y + n_y: (iy - offset.j)% n_y;
+            const int idx_in = modulo_x + modulo_y * n_x;
+            abs_out[idx_out] = abs_in[idx_in];
+
+        }
+    }
+template<typename TF> __global__
+    void get_mean_profile(
+            TF* const __restrict__ prof,
+            const TF* const __restrict__ fld,
+            const TF scalefac,
+            const int istart, const int iend,
+            const int jstart, const int jend,
+            const int kcells,
+            const int icells, const int ijcells)
+    {
+        const int i = blockIdx.x*blockDim.x + threadIdx.x + istart;
+        const int j = blockIdx.y*blockDim.y + threadIdx.y + jstart;
+        const int k = blockIdx.z;
+
+        if (i < iend && j < jend && k < kcells)
+        {
+            const int ijk = i + j*icells + k*ijcells;
+            atomicAdd(&prof[k], fld[ijk]*scalefac);
+        }
+    }
+
+    __global__
+    void tica_mean_profile(const int n_x, const int n_y, const int n_z,
+                           const Float n_col_inv,
+                           const Float* field,
+                           Float* profile)
+    {
+        const int ix = blockIdx.x*blockDim.x + threadIdx.x;
+        const int iy = blockIdx.y*blockDim.y + threadIdx.y;
+        const int iz = blockIdx.z*blockDim.z + threadIdx.z;
+
+        if ( ( ix < n_x) && ( iy < n_y) && (iz < n_z) )
+        {
+            const int idx  = ix + iy*n_y + iz*n_y*n_x;
+            atomicAdd(&profile[iz], field[idx] * n_col_inv);
+        }
+
+    }
+
+    __global__
+    void tica_profile_to_3d(const int n_x, const int n_y, const int n_z,
+                            const Float n_col_inv,
+                            const Float* profile,
+                            Float* field)
+    {
+        const int ix = blockIdx.x*blockDim.x + threadIdx.x;
+        const int iy = blockIdx.y*blockDim.y + threadIdx.y;
+        const int iz = blockIdx.z*blockDim.z + threadIdx.z;
+
+        if ( ( ix < n_x) && ( iy < n_y) && (iz < n_z) )
+        {
+            const int idx  = ix + iy*n_y + iz*n_y*n_x;
+            field[idx] = profile[iz];
+        }
+    }
+
+
+    __global__
     void compute_rh(const int n_x, const int n_y, const int n_z,
                     const Float* t_lay,
                     const Float* p_lay,
@@ -296,40 +462,21 @@ void tica_tilt_gpu(
         const Float sza, const Float azi,
         const int n_col_x, const int n_col_y, const int n_col,
         const int n_lay, const int n_lev, const int n_z_in, const int n_zh_in ,
-        Array<Float,1>& xh, Array<Float,1>& yh, Array<Float,1>& zh, Array<Float,1>& z,
+        const Array_gpu<Float,1>& z, const Array_gpu<Float,1>& zh,
         Array_gpu<Float,2>& p_lay, Array_gpu<Float,2>& t_lay, Array_gpu<Float,2>& p_lev, Array_gpu<Float,2>& t_lev,
         Array_gpu<Float,2>& lwp, Array_gpu<Float,2>& iwp, Array_gpu<Float,2>& rel, Array_gpu<Float,2>& dei, Array_gpu<Float,2>& rh,
+        const Array_gpu<ijk,1>& tilted_path, const Array_gpu<int,1>& tilted_path_bounds,
+        const Array_gpu<Float,1>& zh_tilted, Array_gpu<Float,1>& p_lev_tilt,
         Gas_concs_gpu& gas_concs, Aerosol_concs_gpu& aerosol_concs,
         std::vector<std::string>& gas_names, std::vector<std::string>& aerosol_names,
         bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
         int rnd_seed)
 {
-    ////// SETUP FOR CENTER START POINT TILTING //////
-    // Finding tilted path can stay on CPU
-    Array<ijk,1> center_path;
-    Array<Float,1> center_zh_tilt;
-    create_tilted_path(xh.v(),yh.v(),zh.v(),z.v(),sza,azi, 0.5, 0.5, center_path.v(), center_zh_tilt.v());
-
-
-    int n_zh_tilt_center = center_zh_tilt.v().size();
-    int n_z_tilt_center = n_zh_tilt_center - 1;
-
-    center_path.set_dims({n_zh_tilt_center});
-    center_zh_tilt.set_dims({n_zh_tilt_center});
-
-    Array<int,1> center_path_bounds({n_zh_in});
-    get_tilted_path_bounds(n_zh_tilt_center, center_path.v(), center_path_bounds.v());
-
-    Array_gpu<ijk,1> center_path_gpu(center_path);
-    Array_gpu<Float,1> center_zh_tilt_gpu(center_zh_tilt);
-    Array_gpu<int,1> center_path_bounds_gpu(center_path_bounds);
-    Array_gpu<Float,1> zh_gpu(zh);
-    Array_gpu<Float,1> z_gpu(z);
+    int n_zh_tilted = tilted_path.size();
+    int n_z_tilted = n_zh_tilted - 1;
 
     // p_lay and p_lev remain unchanged after tiltint and compression.
     // However, we need to obtain the pressures at each cell crossing of the tilted path to use for weighted averaging
-    Array_gpu<Float,1> p_lev_tilt({n_zh_tilt_center});
-
     const int block_col_x = 8;
     const int block_col_y = 8;
     const int block_z_in = 4;
@@ -339,8 +486,8 @@ void tica_tilt_gpu(
     const int grid_col_x = n_col_x/block_col_x + (n_col_x%block_col_x > 0);
     const int grid_col_y = n_col_y/block_col_y + (n_col_y%block_col_y > 0);
     const int grid_z_in = n_z_in/block_z_in + (n_z_in%block_z_in > 0);
-    const int grid_z_tilt = n_z_tilt_center/block_z_tilt + (n_z_tilt_center%block_z_tilt > 0);
-    const int grid_zh_tilt = n_zh_tilt_center/block_zh_tilt + (n_zh_tilt_center%block_zh_tilt > 0);
+    const int grid_z_tilt = n_z_tilted/block_z_tilt + (n_z_tilted%block_z_tilt > 0);
+    const int grid_zh_tilt = n_zh_tilted/block_zh_tilt + (n_zh_tilted%block_zh_tilt > 0);
 
     dim3 grid_1d(grid_zh_tilt);
     dim3 block_1d(block_zh_tilt);
@@ -352,32 +499,32 @@ void tica_tilt_gpu(
     dim3 block_3d_2(block_col_x, block_col_y, block_z_tilt);
 
     tilt_plev_gpu<<<grid_1d, block_1d>>>(
-            n_col_x, n_col_y, n_z_in, n_z_tilt_center,
-            center_path_gpu.ptr(),
-            center_zh_tilt_gpu.ptr(), z_gpu.ptr(), zh_gpu.ptr(),
+            n_col_x, n_col_y, n_z_in, n_z_tilted,
+            tilted_path.ptr(),
+            zh_tilted.ptr(), z.ptr(), zh.ptr(),
             p_lay.ptr(), p_lev.ptr(),
             p_lev_tilt.ptr() );
 
     // T_lev remains unchanged after tilting and compression.
     // T_lay is first to z_tilt and then compressed
 
-    Array_gpu<Float,2> t_lay_tilt({n_col, n_z_tilt_center});
+    Array_gpu<Float,2> t_lay_tilt({n_col, n_z_tilted});
 
     tilt_tlay_gpu<<<grid_3d_2, block_3d_2>>>(
-        n_col_x, n_col_y, n_z_in, n_z_tilt_center,
-        center_path_gpu.ptr(),
-        center_zh_tilt_gpu.ptr(), z_gpu.ptr(), zh_gpu.ptr(),
+        n_col_x, n_col_y, n_z_in, n_z_tilted,
+        tilted_path.ptr(),
+        zh_tilted.ptr(), z.ptr(), zh.ptr(),
         t_lay.ptr(), t_lev.ptr(),
         t_lay_tilt.ptr() );
 
     compress_tilted_columns_gpu<<<grid_3d_1, block_3d_1>>>(
         n_col_x, n_col_y, n_z_in,
-        center_path_bounds_gpu.ptr(),
+        tilted_path_bounds.ptr(),
         t_lay_tilt.ptr(), p_lev_tilt.ptr(),
         t_lay.ptr());
 
     //// tilt and compress gasses ////
-    Array_gpu<Float,2> gas_tilt({n_col, n_z_tilt_center});
+    Array_gpu<Float,2> gas_tilt({n_col, n_z_tilted});
 
     for (const auto& gas_name : gas_names)
     {
@@ -392,13 +539,13 @@ void tica_tilt_gpu(
             if (gas.get_dims()[0] > 1)
             { // checking: do we have 3D field?
                 tilt_layers_gpu<<<grid_3d_2, block_3d_2>>>(
-                        n_col_x, n_col_y, n_z_tilt_center,
-                        center_path_gpu.ptr(),
+                        n_col_x, n_col_y, n_z_tilted,
+                        tilted_path.ptr(),
                         gas.ptr(), gas_tilt.ptr());
 
                 compress_tilted_columns_gpu<<<grid_3d_1, block_3d_1>>>(
                         n_col_x, n_col_y, n_z_in,
-                        center_path_bounds_gpu.ptr(),
+                        tilted_path_bounds.ptr(),
                         gas_tilt.ptr(), p_lev_tilt.ptr(),
                         gas.ptr());
 
@@ -423,7 +570,7 @@ void tica_tilt_gpu(
 
     if (switch_aerosol_optics)
     {
-        Array_gpu<Float,2> aerosol_tilt({n_col, n_z_tilt_center});
+        Array_gpu<Float,2> aerosol_tilt({n_col, n_z_tilted});
 
         for (const auto& aerosol_name : aerosol_names)
         {
@@ -439,13 +586,13 @@ void tica_tilt_gpu(
                 {
                     //  Only tilt if we have a 3D aerosol field
                     tilt_layers_gpu<<<grid_3d_2, block_3d_2>>>(
-                            n_col_x, n_col_y, n_z_tilt_center,
-                            center_path_gpu.ptr(),
+                            n_col_x, n_col_y, n_z_tilted,
+                            tilted_path.ptr(),
                             aerosol.ptr(), aerosol_tilt.ptr());
 
                     compress_tilted_columns_gpu<<<grid_3d_1, block_3d_1>>>(
                             n_col_x, n_col_y, n_z_in,
-                            center_path_bounds_gpu.ptr(),
+                            tilted_path_bounds.ptr(),
                             aerosol_tilt.ptr(), p_lev_tilt.ptr(),
                             aerosol.ptr());
 
@@ -459,20 +606,20 @@ void tica_tilt_gpu(
     if (switch_cloud_optics)
     {
 
-        Array_gpu<Float,2> lwp_tmp({n_col, n_z_tilt_center});
-        Array_gpu<Float,2> rel_tmp({n_col, n_z_tilt_center});
-        Array_gpu<Float,2> iwp_tmp({n_col, n_z_tilt_center});
-        Array_gpu<Float,2> dei_tmp({n_col, n_z_tilt_center});
+        Array_gpu<Float,2> lwp_tmp({n_col, n_z_tilted});
+        Array_gpu<Float,2> rel_tmp({n_col, n_z_tilted});
+        Array_gpu<Float,2> iwp_tmp({n_col, n_z_tilted});
+        Array_gpu<Float,2> dei_tmp({n_col, n_z_tilted});
 
         if (switch_liq_cloud_optics)
         {
-            tilt_clouds_gpu<<<grid_3d_2, block_3d_2>>>(n_col_x, n_col_y, n_z_tilt_center,
-                                         center_path_gpu.ptr(), zh_gpu.ptr(),
+            tilt_clouds_gpu<<<grid_3d_2, block_3d_2>>>(n_col_x, n_col_y, n_z_tilted,
+                                         tilted_path.ptr(), zh.ptr(),
                                          lwp.ptr(), rel.ptr(),
                                          lwp_tmp.ptr(), rel_tmp.ptr());
 
             compress_tilted_clouds_gpu<<<grid_3d_1, block_3d_1>>>(n_col_x, n_col_y, n_z_in,
-                                               center_path_bounds_gpu.ptr(), center_zh_tilt_gpu.ptr(),
+                                               tilted_path_bounds.ptr(), zh_tilted.ptr(),
                                                Float(2.5), Float(21.5),
                                                lwp_tmp.ptr(), rel_tmp.ptr(),
                                                lwp.ptr(), rel.ptr());
@@ -481,13 +628,13 @@ void tica_tilt_gpu(
 
         if (switch_ice_cloud_optics)
         {
-            tilt_clouds_gpu<<<grid_3d_2, block_3d_2>>>(n_col_x, n_col_y, n_z_tilt_center,
-                                         center_path_gpu.ptr(), zh_gpu.ptr(),
+            tilt_clouds_gpu<<<grid_3d_2, block_3d_2>>>(n_col_x, n_col_y, n_z_tilted,
+                                         tilted_path.ptr(), zh.ptr(),
                                          iwp.ptr(), dei.ptr(),
                                          iwp_tmp.ptr(), dei_tmp.ptr());
 
             compress_tilted_clouds_gpu<<<grid_3d_1, block_3d_1>>>(n_col_x, n_col_y, n_z_in,
-                                               center_path_bounds_gpu.ptr(), center_zh_tilt_gpu.ptr(),
+                                               tilted_path_bounds.ptr(), zh_tilted.ptr(),
                                                Float(10), Float(180.),
                                                iwp_tmp.ptr(), dei_tmp.ptr(),
                                                iwp.ptr(), dei.ptr());
@@ -496,4 +643,183 @@ void tica_tilt_gpu(
 
     }
 }
+
+void tica_reverse_gpu(
+        const int n_col_x, const int n_col_y, const int n_lay, const int n_lev,
+        const int n_z, const int n_z_in, const int n_zh_in ,
+        const bool do_tilting, const bool switch_twostream, const bool switch_raytracing,
+        const Array_gpu<Float,1>& zh, const Array_gpu<Float,1>& zh_tilt,
+        const Array_gpu<ijk,1>& tilted_path, const Array_gpu<int,1>& tilted_path_bounds,
+        const Array_gpu<Float,1>& p_lev_tilt,
+        const Array_gpu<Float,2>& sw_flux_dn_tilt, const Array_gpu<Float,2>& sw_flux_dn_dir_tilt,
+        const Array_gpu<Float,2>& sw_flux_up_tilt, const Array_gpu<Float,2>& sw_flux_net_tilt,
+        const Array_gpu<Float,3>& rt_flux_abs_dir_tilt, const Array_gpu<Float,3>& rt_flux_abs_dif_tilt, const Array_gpu<Float,2>& rt_flux_tod_up_tilt,
+        Array_gpu<Float,2>& sw_flux_dn, Array_gpu<Float,2>& sw_flux_dn_dir,
+        Array_gpu<Float,2>& sw_flux_up, Array_gpu<Float,2>& sw_flux_net,
+        Array_gpu<Float,3>& rt_flux_abs_dir, Array_gpu<Float,3>& rt_flux_abs_dif, Array_gpu<Float,2>& rt_flux_tod_up)
+{
+    const int n_zh_tilted = zh_tilt.size();
+    const int n_col = n_col_x * n_col_y;
+    const int block_col_x = 8;
+    const int block_col_y = 8;
+    const int block_lev = 4;
+    const int block_z   = 4;
+
+    const int grid_col_x = n_col_x/block_col_x + (n_col_x%block_col_x > 0);
+    const int grid_col_y = n_col_y/block_col_y + (n_col_y%block_col_y > 0);
+    const int grid_lev = n_lev/block_lev + (n_lev%block_lev > 0);
+    const int grid_z   = n_z/block_z + (n_z%block_z > 0);
+
+    dim3 grid_3d_lev(grid_col_x, grid_col_y, grid_lev);
+    dim3 block_3d_lev(block_col_x, block_col_y, block_lev);
+
+    dim3 grid_3d_z(grid_col_x, grid_col_y, grid_z);
+    dim3 block_3d_z(block_col_x, block_col_y, block_z);
+
+    dim3 grid_2d(grid_col_x, grid_col_y, 1);
+    dim3 block_2d(block_col_x, block_col_y, 1);
+
+    if (do_tilting)
+    {
+        if (switch_twostream)
+        {
+            sw_flux_dn.set_dims({n_col, n_lev});
+            sw_flux_dn_dir.set_dims({n_col, n_lev});
+            sw_flux_up.set_dims({n_col, n_lev});
+            sw_flux_net.set_dims({n_col, n_lev});
+
+            translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_z_in, n_lev,
+                    tilted_path.ptr(), tilted_path_bounds.ptr(),
+                    sw_flux_dn_tilt.ptr(), sw_flux_dn.ptr());
+            translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_z_in, n_lev,
+                    tilted_path.ptr(), tilted_path_bounds.ptr(),
+                    sw_flux_dn_dir_tilt.ptr(), sw_flux_dn_dir.ptr());
+            translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_z_in, n_lev,
+                    tilted_path.ptr(), tilted_path_bounds.ptr(),
+                    sw_flux_up_tilt.ptr(), sw_flux_up.ptr());
+            translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_z_in, n_lev,
+                    tilted_path.ptr(), tilted_path_bounds.ptr(),
+                    sw_flux_net_tilt.ptr(), sw_flux_net.ptr());
+        }
+
+        if (switch_raytracing)
+        {
+            rt_flux_abs_dir.set_dims({n_col_x, n_col_y, n_z});
+            rt_flux_abs_dif.set_dims({n_col_x, n_col_y, n_z});
+            rt_flux_tod_up.set_dims({n_col_x, n_col_y});
+
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col_x, n_col_y, n_z, rt_flux_abs_dir.ptr());
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col_x, n_col_y, n_z, rt_flux_abs_dif.ptr());
+
+            translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
+                    n_col_x, n_col_y, n_z_in, n_z,
+                    tilted_path.ptr(),
+                    tilted_path_bounds.ptr(),
+                    p_lev_tilt.ptr(),
+                    rt_flux_abs_dir_tilt.ptr(),
+                    rt_flux_abs_dir.ptr());
+
+            translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
+                    n_col_x, n_col_y, n_z_in, n_z,
+                    tilted_path.ptr(),
+                    tilted_path_bounds.ptr(),
+                    p_lev_tilt.ptr(),
+                    rt_flux_abs_dif_tilt.ptr(),
+                    rt_flux_abs_dif.ptr());
+
+            translate_toa_flux_gpu<<<grid_2d, block_2d>>>(
+                    n_col_x, n_col_y, n_zh_tilted,
+                    tilted_path.ptr(),
+                    tilted_path_bounds.ptr(),
+                    rt_flux_tod_up_tilt.ptr(),
+                    rt_flux_tod_up.ptr());
+        }
+    }
+    else
+    {
+        Array_gpu<Float,1> mean_profile({n_lev});
+        const Float n_col_inv = Float(1.) / (n_col_x * n_col_y);
+
+        if (switch_twostream)
+        {
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
+
+            tica_mean_profile<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_lev, n_col_inv,
+                    sw_flux_dn_tilt.ptr(), mean_profile.ptr());
+
+            tica_profile_to_3d<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_lev, n_col_inv,
+                    mean_profile.ptr(), sw_flux_dn.ptr());
+
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
+
+            tica_mean_profile<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_lev, n_col_inv,
+                    sw_flux_dn_dir_tilt.ptr(), mean_profile.ptr());
+
+            tica_profile_to_3d<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_lev, n_col_inv,
+                    mean_profile.ptr(), sw_flux_dn_dir.ptr());
+
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
+
+            tica_mean_profile<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_lev, n_col_inv,
+                    sw_flux_up_tilt.ptr(), mean_profile.ptr());
+
+            tica_profile_to_3d<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_lev, n_col_inv,
+                    mean_profile.ptr(), sw_flux_up.ptr());
+
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
+
+            tica_mean_profile<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_lev, n_col_inv,
+                    sw_flux_net.ptr(), mean_profile.ptr());
+
+            tica_profile_to_3d<<<grid_3d_lev, block_3d_lev>>>(
+                    n_col_x, n_col_y, n_lev, n_col_inv,
+                    mean_profile.ptr(), sw_flux_net.ptr());
+        }
+        if (switch_raytracing)
+        {
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
+
+            tica_mean_profile<<<grid_3d_z, block_3d_z>>>(
+                    n_col_x, n_col_y, n_z, n_col_inv,
+                    rt_flux_abs_dir.ptr(), mean_profile.ptr());
+
+            tica_profile_to_3d<<<grid_3d_z, block_3d_z>>>(
+                    n_col_x, n_col_y, n_z, n_col_inv,
+                    mean_profile.ptr(), rt_flux_abs_dir.ptr());
+
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
+
+            tica_mean_profile<<<grid_3d_z, block_3d_z>>>(
+                    n_col_x, n_col_y, n_z, n_col_inv,
+                    rt_flux_abs_dif.ptr(), mean_profile.ptr());
+
+            tica_profile_to_3d<<<grid_3d_z, block_3d_z>>>(
+                    n_col_x, n_col_y, n_z, n_col_inv,
+                    mean_profile.ptr(), rt_flux_abs_dif.ptr());
+
+
+            Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_lev, mean_profile.ptr());
+
+            tica_mean_profile<<<grid_2d, block_2d>>>(
+                    n_col_x, n_col_y, 1, n_col_inv,
+                    rt_flux_tod_up.ptr(), mean_profile.ptr());
+
+            tica_profile_to_3d<<<grid_2d, block_2d>>>(
+                    n_col_x, n_col_y, 1, n_col_inv,
+                    mean_profile.ptr(), rt_flux_tod_up.ptr());
+        }
+    }
+}
+
 
