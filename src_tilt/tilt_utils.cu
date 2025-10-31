@@ -552,10 +552,6 @@ void tica_tilt_gpu(
                 gas_concs.set_vmr(gas_name, gas);
 
             }
-            else
-            {
-                throw std::runtime_error("No tilted column implementation for single column profiles.");
-            }
             if ( (gas_name == "h2o") && switch_aerosol_optics )
             {
                 Tilted_column_cuda::compute_rh<<<grid_3d_1, block_3d_1>>>(
