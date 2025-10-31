@@ -185,9 +185,28 @@ void tica_tilt_simple(const int n_col_x, const int n_col_y, const int n_col,
                       bool switch_cloud_optics, bool switch_liq_cloud_optics, bool switch_ice_cloud_optics, bool switch_aerosol_optics,
                       Array<ijk,1> center_path, Array<Float,1> center_zh_tilt, const int n_z_tilt_center);
 
-
-
 #ifdef __CUDACC__
+namespace Tilted_column_cuda
+{
+    __global__
+    void translate_twostream_fluxes_gpu(const int n_x, const int n_y, const int n_z, const int n_lev_in,
+                      const ijk* tilted_path,
+                      const int* tilted_path_bounds,
+                      const Float* flux_in,
+                      Float* flux_out);
+    __global__
+    void tica_mean_profile(const int n_x, const int n_y, const int n_z,
+                           const Float n_col_inv,
+                           const Float* field,
+                           Float* profile);
+
+    __global__
+    void tica_profile_to_3d(const int n_x, const int n_y, const int n_z,
+                            const Float n_col_inv,
+                            const Float* profile,
+                            Float* field);
+}
+
 /// GPU functions
 void tica_tilt_gpu(const Float sza, const Float azi,
     const int n_col_x, const int n_col_y, const int n_col,

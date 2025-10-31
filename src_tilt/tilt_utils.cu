@@ -17,7 +17,7 @@
 
 #include "gas_optics_rrtmgp_kernels_cuda_rt.h"
 
-namespace
+namespace Tilted_column_cuda
 {
     __device__
     Float interpolate_gpu(const int n_x, const int n_y, const int n_lay_in,
@@ -498,7 +498,7 @@ void tica_tilt_gpu(
     dim3 grid_3d_2(grid_col_x, grid_col_y, grid_z_tilt);
     dim3 block_3d_2(block_col_x, block_col_y, block_z_tilt);
 
-    tilt_plev_gpu<<<grid_1d, block_1d>>>(
+    Tilted_column_cuda::tilt_plev_gpu<<<grid_1d, block_1d>>>(
             n_col_x, n_col_y, n_z_in, n_z_tilted,
             tilted_path.ptr(),
             zh_tilted.ptr(), z.ptr(), zh.ptr(),
@@ -510,14 +510,14 @@ void tica_tilt_gpu(
 
     Array_gpu<Float,2> t_lay_tilt({n_col, n_z_tilted});
 
-    tilt_tlay_gpu<<<grid_3d_2, block_3d_2>>>(
+    Tilted_column_cuda::tilt_tlay_gpu<<<grid_3d_2, block_3d_2>>>(
         n_col_x, n_col_y, n_z_in, n_z_tilted,
         tilted_path.ptr(),
         zh_tilted.ptr(), z.ptr(), zh.ptr(),
         t_lay.ptr(), t_lev.ptr(),
         t_lay_tilt.ptr() );
 
-    compress_tilted_columns_gpu<<<grid_3d_1, block_3d_1>>>(
+    Tilted_column_cuda::compress_tilted_columns_gpu<<<grid_3d_1, block_3d_1>>>(
         n_col_x, n_col_y, n_z_in,
         tilted_path_bounds.ptr(),
         t_lay_tilt.ptr(), p_lev_tilt.ptr(),
@@ -538,12 +538,12 @@ void tica_tilt_gpu(
         {
             if (gas.get_dims()[0] > 1)
             { // checking: do we have 3D field?
-                tilt_layers_gpu<<<grid_3d_2, block_3d_2>>>(
+                Tilted_column_cuda::tilt_layers_gpu<<<grid_3d_2, block_3d_2>>>(
                         n_col_x, n_col_y, n_z_tilted,
                         tilted_path.ptr(),
                         gas.ptr(), gas_tilt.ptr());
 
-                compress_tilted_columns_gpu<<<grid_3d_1, block_3d_1>>>(
+                Tilted_column_cuda::compress_tilted_columns_gpu<<<grid_3d_1, block_3d_1>>>(
                         n_col_x, n_col_y, n_z_in,
                         tilted_path_bounds.ptr(),
                         gas_tilt.ptr(), p_lev_tilt.ptr(),
@@ -558,7 +558,7 @@ void tica_tilt_gpu(
             }
             if ( (gas_name == "h2o") && switch_aerosol_optics )
             {
-                compute_rh<<<grid_3d_1, block_3d_1>>>(
+                Tilted_column_cuda::compute_rh<<<grid_3d_1, block_3d_1>>>(
                         n_col_x, n_col_y, n_z_in,
                         t_lay.ptr(),
                         p_lay.ptr(),
@@ -585,12 +585,12 @@ void tica_tilt_gpu(
                 if (aerosol.get_dims()[0] > 1)
                 {
                     //  Only tilt if we have a 3D aerosol field
-                    tilt_layers_gpu<<<grid_3d_2, block_3d_2>>>(
+                    Tilted_column_cuda::tilt_layers_gpu<<<grid_3d_2, block_3d_2>>>(
                             n_col_x, n_col_y, n_z_tilted,
                             tilted_path.ptr(),
                             aerosol.ptr(), aerosol_tilt.ptr());
 
-                    compress_tilted_columns_gpu<<<grid_3d_1, block_3d_1>>>(
+                    Tilted_column_cuda::compress_tilted_columns_gpu<<<grid_3d_1, block_3d_1>>>(
                             n_col_x, n_col_y, n_z_in,
                             tilted_path_bounds.ptr(),
                             aerosol_tilt.ptr(), p_lev_tilt.ptr(),
@@ -613,12 +613,12 @@ void tica_tilt_gpu(
 
         if (switch_liq_cloud_optics)
         {
-            tilt_clouds_gpu<<<grid_3d_2, block_3d_2>>>(n_col_x, n_col_y, n_z_tilted,
+            Tilted_column_cuda::tilt_clouds_gpu<<<grid_3d_2, block_3d_2>>>(n_col_x, n_col_y, n_z_tilted,
                                          tilted_path.ptr(), zh.ptr(),
                                          lwp.ptr(), rel.ptr(),
                                          lwp_tmp.ptr(), rel_tmp.ptr());
 
-            compress_tilted_clouds_gpu<<<grid_3d_1, block_3d_1>>>(n_col_x, n_col_y, n_z_in,
+            Tilted_column_cuda::compress_tilted_clouds_gpu<<<grid_3d_1, block_3d_1>>>(n_col_x, n_col_y, n_z_in,
                                                tilted_path_bounds.ptr(), zh_tilted.ptr(),
                                                Float(2.5), Float(21.5),
                                                lwp_tmp.ptr(), rel_tmp.ptr(),
@@ -628,12 +628,12 @@ void tica_tilt_gpu(
 
         if (switch_ice_cloud_optics)
         {
-            tilt_clouds_gpu<<<grid_3d_2, block_3d_2>>>(n_col_x, n_col_y, n_z_tilted,
+            Tilted_column_cuda::tilt_clouds_gpu<<<grid_3d_2, block_3d_2>>>(n_col_x, n_col_y, n_z_tilted,
                                          tilted_path.ptr(), zh.ptr(),
                                          iwp.ptr(), dei.ptr(),
                                          iwp_tmp.ptr(), dei_tmp.ptr());
 
-            compress_tilted_clouds_gpu<<<grid_3d_1, block_3d_1>>>(n_col_x, n_col_y, n_z_in,
+            Tilted_column_cuda::compress_tilted_clouds_gpu<<<grid_3d_1, block_3d_1>>>(n_col_x, n_col_y, n_z_in,
                                                tilted_path_bounds.ptr(), zh_tilted.ptr(),
                                                Float(10), Float(180.),
                                                iwp_tmp.ptr(), dei_tmp.ptr(),
@@ -687,19 +687,19 @@ void tica_reverse_gpu(
         sw_flux_up.set_dims({n_col, n_lev});
         sw_flux_net.set_dims({n_col, n_lev});
 
-        translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+        Tilted_column_cuda::translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
                 n_col_x, n_col_y, n_z_in, n_lev,
                 tilted_path.ptr(), tilted_path_bounds.ptr(),
                 sw_flux_dn_tilt.ptr(), sw_flux_dn.ptr());
-        translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+        Tilted_column_cuda::translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
                 n_col_x, n_col_y, n_z_in, n_lev,
                 tilted_path.ptr(), tilted_path_bounds.ptr(),
                 sw_flux_dn_dir_tilt.ptr(), sw_flux_dn_dir.ptr());
-        translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+        Tilted_column_cuda::translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
                 n_col_x, n_col_y, n_z_in, n_lev,
                 tilted_path.ptr(), tilted_path_bounds.ptr(),
                 sw_flux_up_tilt.ptr(), sw_flux_up.ptr());
-        translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
+        Tilted_column_cuda::translate_twostream_fluxes_gpu<<<grid_3d_lev, block_3d_lev>>>(
                 n_col_x, n_col_y, n_z_in, n_lev,
                 tilted_path.ptr(), tilted_path_bounds.ptr(),
                 sw_flux_net_tilt.ptr(), sw_flux_net.ptr());
@@ -714,7 +714,7 @@ void tica_reverse_gpu(
         Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col_x, n_col_y, n_z, rt_flux_abs_dir.ptr());
         Gas_optics_rrtmgp_kernels_cuda_rt::zero_array(n_col_x, n_col_y, n_z, rt_flux_abs_dif.ptr());
 
-        translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
+        Tilted_column_cuda::translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
                 n_col_x, n_col_y, n_z_in, n_z,
                 tilted_path.ptr(),
                 tilted_path_bounds.ptr(),
@@ -722,7 +722,7 @@ void tica_reverse_gpu(
                 rt_flux_abs_dir_tilt.ptr(),
                 rt_flux_abs_dir.ptr());
 
-        translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
+        Tilted_column_cuda::translate_absorption_gpu<<<grid_3d_z, block_3d_z>>>(
                 n_col_x, n_col_y, n_z_in, n_z,
                 tilted_path.ptr(),
                 tilted_path_bounds.ptr(),
@@ -730,7 +730,7 @@ void tica_reverse_gpu(
                 rt_flux_abs_dif_tilt.ptr(),
                 rt_flux_abs_dif.ptr());
 
-        translate_toa_flux_gpu<<<grid_2d, block_2d>>>(
+        Tilted_column_cuda::translate_toa_flux_gpu<<<grid_2d, block_2d>>>(
                 n_col_x, n_col_y, n_zh_tilted,
                 tilted_path.ptr(),
                 tilted_path_bounds.ptr(),
