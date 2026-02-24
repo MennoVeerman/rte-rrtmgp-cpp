@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import netCDF4 as nc
 
-data = nc.Dataset("rte_rrtmgp_output.nc")
+data = nc.Dataset("lw_case_to_chiel_output.nc")
 # ref = nc.Dataset("ref.nc")
 
 z = data.variables["z"][:]
