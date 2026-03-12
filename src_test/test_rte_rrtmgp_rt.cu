@@ -642,7 +642,7 @@ void solve_radiation(int argc, char** argv)
 
     Netcdf_group nc_grp_forward = output_nc.add_group("rt_forward");
     Netcdf_group nc_grp_backward = output_nc.add_group("rt_backward");
-    Netcdf_group nc_grp_planeparallel = output_nc.add_group("planeparallel");
+    Netcdf_group nc_grp_planeparallel = output_nc.add_group("plane_parallel");
     Netcdf_group nc_grp_optics = output_nc.add_group("optical_properties");
 
     auto nc_x = output_nc.add_variable<Float>("x", {"x"});
