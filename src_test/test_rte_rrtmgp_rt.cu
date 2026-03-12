@@ -132,6 +132,18 @@ void configure_memory_pool(int nlays, int ncols, int nchunks, int ngpts, int nbn
     //#endif
 }
 
+struct nc_outvar
+{
+    std::string nc_name, long_name, units, solver;
+    std::vector<std::string> dims;
+    std::vector<int> offsets;
+    const std::vector<Float>* data;
+
+    nc_outvar(std::string nc_name, std::string long_name, std::string units, std::string solver,
+           std::vector<std::string> dims, std::vector<int> offsets, const std::vector<Float>& data) :
+           nc_name(nc_name), long_name(long_name), units(units), solver(solver),
+           dims(dims), offsets(offsets), data(&data) {}
+};
 
 template<typename T>
 T get_ini_value(const toml::value& ini_file, const std::string& group, const std::string& item)
@@ -805,68 +817,85 @@ void solve_radiation(int argc, char** argv)
 
         if (lw_single_gpt > 0)
         {
-            auto nc_lw_tau_tot = nc_grp_optics.add_variable<Float>("lw_tau_tot", {"lay", "y", "x"});
-            nc_lw_tau_tot.insert(lw_tau_tot_cpu.v(), {0, 0, 0});
+            const std::string gpt = std::to_string(lw_single_gpt);
 
-            auto nc_lw_tau_cld = nc_grp_optics.add_variable<Float>("lw_tau_cld", {"lay", "y", "x"});
-            nc_lw_tau_cld.insert(lw_tau_cld_cpu.v(), {0, 0, 0});
-
-            auto nc_lw_tau_aer = nc_grp_optics.add_variable<Float>("lw_tau_aer", {"lay", "y", "x"});
-            nc_lw_tau_aer.insert(lw_tau_aer_cpu.v(), {0, 0, 0});
-
+            std::vector<nc_outvar> optics_vars;
             if (switch_lw_scattering)
             {
-                auto nc_lw_ssa_tot = nc_grp_optics.add_variable<Float>("lw_ssa_tot", {"lay", "y", "x"});
-                nc_lw_ssa_tot.insert(lw_ssa_tot_cpu.v(), {0, 0, 0});
-
-                auto nc_lw_ssa_cld = nc_grp_optics.add_variable<Float>("lw_ssa_cld", {"lay", "y", "x"});
-                nc_lw_ssa_cld.insert(lw_ssa_cld_cpu.v(), {0, 0, 0});
-
-                auto nc_lw_asy_cld = nc_grp_optics.add_variable<Float>("lw_asy_cld", {"lay", "y", "x"});
-                nc_lw_asy_cld.insert(lw_asy_cld_cpu.v(), {0, 0, 0});
-
-                auto nc_lw_ssa_aer = nc_grp_optics.add_variable<Float>("lw_ssa_aer", {"lay", "y", "x"});
-                nc_lw_ssa_aer.insert(lw_ssa_aer_cpu.v(), {0, 0, 0});
-
-                auto nc_lw_asy_aer = nc_grp_optics.add_variable<Float>("lw_asy_aer", {"lay", "y", "x"});
-                nc_lw_asy_aer.insert(lw_asy_aer_cpu.v(), {0, 0, 0});
-
+                optics_vars =
+                {
+                    nc_outvar{"lw_tau_tot", "Total optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_tot_cpu.v()},
+                    nc_outvar{"lw_tau_cld", "Cloud optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_cld_cpu.v()},
+                    nc_outvar{"lw_tau_aer", "Aerosol optical depth at g-point "                + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_aer_cpu.v()},
+                    nc_outvar{"lay_source", "Layer source at g-point "                         + gpt, "W m-2 sr-1", "", {"lay","y","x"}, {0,0,0}, lay_source_cpu.v()},
+                    nc_outvar{"lev_source", "Level source at g-point "                         + gpt, "W m-2 sr-1", "", {"lev","y","x"}, {0,0,0}, lev_source_cpu.v()},
+                    nc_outvar{"sfc_source", "Surface source at at g-point "                    + gpt, "W m-2 sr-1", "", {"y","x"},       {0,0},   sfc_source_cpu.v()},
+                };
             }
-            auto nc_lay_source = nc_grp_optics.add_variable<Float>("lay_source"    , {"lay", "y", "x"});
-            auto nc_lev_source = nc_grp_optics.add_variable<Float>("lev_source", {"lev", "y", "x"});
+            else
+            {
+                optics_vars =
+                {
+                    nc_outvar{"lw_tau_tot", "Total optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_tot_cpu.v()},
+                    nc_outvar{"lw_ssa_tot", "Total single scattering albedo at g-point "       + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_ssa_tot_cpu.v()},
+                    nc_outvar{"lw_tau_cld", "Cloud optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_cld_cpu.v()},
+                    nc_outvar{"lw_ssa_cld", "Cloud single scattering albedo at g-point "       + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_ssa_cld_cpu.v()},
+                    nc_outvar{"lw_asy_cld", "Cloud asymmetry parameter at g-point "            + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_asy_cld_cpu.v()},
+                    nc_outvar{"lw_tau_aer", "Aerosol optical depth at g-point "                + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_aer_cpu.v()},
+                    nc_outvar{"lw_ssa_aer", "Aerosol single scattering albedo at g-point "     + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_ssa_aer_cpu.v()},
+                    nc_outvar{"lw_asy_aer", "Aerosol asymmetry parameter at g-point "          + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_asy_aer_cpu.v()},
+                    nc_outvar{"lay_source", "Layer source at g-point "                         + gpt, "W m-2 sr-1", "", {"lay","y","x"}, {0,0,0}, lay_source_cpu.v()},
+                    nc_outvar{"lev_source", "Level source at g-point "                         + gpt, "W m-2 sr-1", "", {"lev","y","x"}, {0,0,0}, lev_source_cpu.v()},
+                    nc_outvar{"sfc_source", "Surface source at at g-point "                    + gpt, "W m-2 sr-1", "", {"y","x"},       {0,0},   sfc_source_cpu.v()},
+                };
+            }
 
-            auto nc_sfc_source = nc_grp_optics.add_variable<Float>("sfc_source", {"y", "x"});
-
-            nc_lay_source.insert    (lay_source_cpu.v()    , {0, 0, 0});
-            nc_lev_source.insert(lev_source_cpu.v(), {0, 0, 0});
-
-            nc_sfc_source.insert(sfc_source_cpu.v(), {0, 0});
+            for (const auto& fv : optics_vars)
+            {
+                auto nc_var = nc_grp_optics.add_variable<Float>(fv.nc_name, fv.dims);
+                nc_var.insert(*fv.data, fv.offsets);
+                nc_var.add_attribute("long_name", fv.long_name);
+                nc_var.add_attribute("units",     fv.units);
+            }
         }
 
         if (switch_lw_plane_parallel)
         {
-            auto nc_lw_flux_up  = nc_grp_planeparallel.add_variable<Float>("lw_flux_up" , {"lev", "y", "x"});
-            auto nc_lw_flux_dn  = nc_grp_planeparallel.add_variable<Float>("lw_flux_dn" , {"lev", "y", "x"});
-            auto nc_lw_flux_net = nc_grp_planeparallel.add_variable<Float>("lw_flux_net", {"lev", "y", "x"});
+            std::string solver = switch_lw_scattering ? "Two-stream solver" : "No-scattering solver";
+            const std::vector<nc_outvar> flux_vars =
+            {
+                nc_outvar{"lw_flux_up",  "Upwelling longwave fluxes",  "W m-2", solver, {"lev","y","x"}, {0,0,0}, lw_flux_up_cpu .v()},
+                nc_outvar{"lw_flux_dn",  "Downwelling longwave fluxes","W m-2", solver, {"lev","y","x"}, {0,0,0}, lw_flux_dn_cpu .v()},
+                nc_outvar{"lw_flux_net", "Net longwave fluxes",        "W m-2", solver, {"lev","y","x"}, {0,0,0}, lw_flux_net_cpu.v()},
+            };
 
-            nc_lw_flux_up .insert(lw_flux_up_cpu .v(), {0, 0, 0});
-            nc_lw_flux_dn .insert(lw_flux_dn_cpu .v(), {0, 0, 0});
-            nc_lw_flux_net.insert(lw_flux_net_cpu.v(), {0, 0, 0});
+            for (const auto& fv : flux_vars)
+            {
+                auto nc_var = nc_grp_planeparallel.add_variable<Float>(fv.nc_name, fv.dims);
+                nc_var.insert(*fv.data, fv.offsets);
+                nc_var.add_attribute("long_name", fv.long_name);
+                nc_var.add_attribute("units",     fv.units);
+                nc_var.add_attribute("solver", fv.solver);
+            }
         }
-
         if (switch_lw_raytracing)
         {
-            auto rt_flux_tod_up  = nc_grp_forward.add_variable<Float>("rt_lw_flux_tod_up" , { "y", "x"});
-            auto rt_flux_tod_dn  = nc_grp_forward.add_variable<Float>("rt_lw_flux_tod_dn" , { "y", "x"});
-            auto rt_flux_sfc_up  = nc_grp_forward.add_variable<Float>("rt_lw_flux_sfc_up" , { "y", "x"});
-            auto rt_flux_sfc_dn  = nc_grp_forward.add_variable<Float>("rt_lw_flux_sfc_dn" , { "y", "x"});
-            auto rt_flux_abs     = nc_grp_forward.add_variable<Float>("rt_lw_flux_abs" , {"z", "y", "x"});
-
-            rt_flux_tod_up.insert(rt_flux_tod_up_cpu.v(), {0, 0});
-            rt_flux_tod_dn.insert(rt_flux_tod_dn_cpu.v(), {0, 0});
-            rt_flux_sfc_up.insert(rt_flux_sfc_up_cpu.v(), {0, 0});
-            rt_flux_sfc_dn.insert(rt_flux_sfc_dn_cpu.v(), {0, 0});
-            rt_flux_abs   .insert(rt_flux_abs_cpu.v(), {0, 0, 0});
+            const std::vector<nc_outvar> flux_vars =
+            {
+                nc_outvar{"rt_lw_flux_tod_up", "Upwelling longwave top-of-domain fluxes",   "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_tod_up_cpu.v()},
+                nc_outvar{"rt_lw_flux_tod_dn", "Downwelling longwave top-of-domain fluxes", "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_tod_dn_cpu.v()},
+                nc_outvar{"rt_lw_flux_sfc_up", "Upwelling longwave surface fluxes",         "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_sfc_up_cpu.v()},
+                nc_outvar{"rt_lw_flux_sfc_dn", "Downwelling longwave surface fluxes",       "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_sfc_dn_cpu.v()},
+                nc_outvar{"rt_lw_flux_abs",    "Absorbed longwave fluxes",                  "W m-3", "Monte Carlo ray tracer", {"z","y","x"}, {0,0,0}, rt_flux_abs_cpu.v()},
+            };
+            for (const auto& fv : flux_vars)
+            {
+                auto nc_var = nc_grp_forward.add_variable<Float>(fv.nc_name, fv.dims);
+                nc_var.insert(*fv.data, fv.offsets);
+                nc_var.add_attribute("long_name", fv.long_name);
+                nc_var.add_attribute("units",     fv.units);
+                nc_var.add_attribute("solver", fv.solver);
+            }
         }
     }
 
@@ -924,7 +953,7 @@ void solve_radiation(int argc, char** argv)
         Array_gpu<Float,2> sw_tau_cld;
         Array_gpu<Float,2> sw_ssa_cld;
         Array_gpu<Float,2> sw_asy_cld;
-        Array_gpu<Float,2> sw_ssa_tau;
+        Array_gpu<Float,2> sw_tau_aer;
         Array_gpu<Float,2> sw_ssa_aer;
         Array_gpu<Float,2> sw_asy_aer;
 
@@ -935,7 +964,7 @@ void solve_radiation(int argc, char** argv)
             sw_tau_cld    .set_dims({n_col, n_lay});
             sw_ssa_cld    .set_dims({n_col, n_lay});
             sw_asy_cld    .set_dims({n_col, n_lay});
-            sw_ssa_tau    .set_dims({n_col, n_lay});
+            sw_tau_aer    .set_dims({n_col, n_lay});
             sw_ssa_aer    .set_dims({n_col, n_lay});
             sw_asy_aer    .set_dims({n_col, n_lay});
         }
@@ -1033,7 +1062,7 @@ void solve_radiation(int argc, char** argv)
                     aerosol_concs_gpu,
                     sw_tau_tot, sw_ssa_tot,
                     sw_tau_cld, sw_ssa_cld, sw_asy_cld,
-                    sw_ssa_tau, sw_ssa_aer, sw_asy_aer,
+                    sw_tau_aer, sw_ssa_aer, sw_asy_aer,
                     sw_flux_up, sw_flux_dn,
                     sw_flux_dn_dir, sw_flux_net,
                     rt_flux_tod_up,
@@ -1064,7 +1093,7 @@ void solve_radiation(int argc, char** argv)
         Array<Float,2> sw_tau_cld_cpu(sw_tau_cld);
         Array<Float,2> sw_ssa_cld_cpu(sw_ssa_cld);
         Array<Float,2> sw_asy_cld_cpu(sw_asy_cld);
-        Array<Float,2> sw_ssa_tau_cpu(sw_ssa_tau);
+        Array<Float,2> sw_tau_aer_cpu(sw_tau_aer);
         Array<Float,2> sw_ssa_aer_cpu(sw_ssa_aer);
         Array<Float,2> sw_asy_aer_cpu(sw_asy_aer);
 
@@ -1082,103 +1111,72 @@ void solve_radiation(int argc, char** argv)
 
         if (sw_single_gpt > 0)
         {
-            auto nc_tot_tau = nc_grp_optics.add_variable<Float>("sw_tau_tot"  , {"lay", "y", "x"});
-            auto nc_tot_ssa = nc_grp_optics.add_variable<Float>("sw_ssa_tot"  , {"lay", "y", "x"});
-            auto nc_cld_tau = nc_grp_optics.add_variable<Float>("sw_tau_cld"  , {"lay", "y", "x"});
-            auto nc_cld_ssa = nc_grp_optics.add_variable<Float>("sw_ssa_cld"  , {"lay", "y", "x"});
-            auto nc_cld_asy = nc_grp_optics.add_variable<Float>("sw_asy_cld"  , {"lay", "y", "x"});
-            auto nc_aer_tau = nc_grp_optics.add_variable<Float>("sw_ssa_tau"  , {"lay", "y", "x"});
-            auto nc_aer_ssa = nc_grp_optics.add_variable<Float>("sw_ssa_aer"  , {"lay", "y", "x"});
-            auto nc_aer_asy = nc_grp_optics.add_variable<Float>("sw_asy_aer"  , {"lay", "y", "x"});
-
-            nc_tot_tau.insert(sw_tau_tot_cpu.v(), {0, 0, 0});
-            nc_tot_ssa.insert(sw_ssa_tot_cpu.v(), {0, 0, 0});
-            nc_cld_tau.insert(sw_tau_cld_cpu.v(), {0, 0, 0});
-            nc_cld_ssa.insert(sw_ssa_cld_cpu.v(), {0, 0, 0});
-            nc_cld_asy.insert(sw_asy_cld_cpu.v(), {0, 0, 0});
-            nc_aer_tau.insert(sw_ssa_tau_cpu.v(), {0, 0, 0});
-            nc_aer_ssa.insert(sw_ssa_aer_cpu.v(), {0, 0, 0});
-            nc_aer_asy.insert(sw_asy_aer_cpu.v(), {0, 0, 0});
-
-            nc_tot_tau.add_attribute("long_name","Total optical depth at g-point "+std::to_string(sw_single_gpt));
-            nc_tot_ssa.add_attribute("long_name","Total single scattering albedo at g-point "+std::to_string(sw_single_gpt));
-            nc_cld_tau.add_attribute("long_name","Cloud optical depth at g-point "+std::to_string(sw_single_gpt));
-            nc_cld_ssa.add_attribute("long_name","Cloud single scattering albedo at g-point "+std::to_string(sw_single_gpt));
-            nc_cld_asy.add_attribute("long_name","Cloud asymmetry parameter at g-point "+std::to_string(sw_single_gpt));
-            nc_aer_tau.add_attribute("long_name","Aerosol optical depth at g-point "+std::to_string(sw_single_gpt));
-            nc_aer_ssa.add_attribute("long_name","Aerosol single scattering albedo at g-point "+std::to_string(sw_single_gpt));
-            nc_aer_asy.add_attribute("long_name","Aerosol asymmetry parameter at g-point "+std::to_string(sw_single_gpt));
-
-            nc_tot_tau.add_attribute("units", "-");
-            nc_tot_ssa.add_attribute("units", "-");
-            nc_cld_tau.add_attribute("units", "-");
-            nc_cld_ssa.add_attribute("units", "-");
-            nc_cld_asy.add_attribute("units", "-");
-            nc_aer_tau.add_attribute("units", "-");
-            nc_aer_ssa.add_attribute("units", "-");
-            nc_aer_asy.add_attribute("units", "-");
-
+            const std::string gpt = std::to_string(sw_single_gpt);
+            const std::vector<nc_outvar> optics_vars =
+            {
+                nc_outvar{"sw_tau_tot", "Total optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_tau_tot_cpu.v()},
+                nc_outvar{"sw_ssa_tot", "Total single scattering albedo at g-point "       + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_ssa_tot_cpu.v()},
+                nc_outvar{"sw_tau_cld", "Cloud optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_tau_cld_cpu.v()},
+                nc_outvar{"sw_ssa_cld", "Cloud single scattering albedo at g-point "       + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_ssa_cld_cpu.v()},
+                nc_outvar{"sw_asy_cld", "Cloud asymmetry parameter at g-point "            + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_asy_cld_cpu.v()},
+                nc_outvar{"sw_tau_aer", "Aerosol optical depth at g-point "                + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_tau_aer_cpu.v()},
+                nc_outvar{"sw_ssa_aer", "Aerosol single scattering albedo at g-point "     + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_ssa_aer_cpu.v()},
+                nc_outvar{"sw_asy_aer", "Aerosol asymmetry parameter at g-point "          + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_asy_aer_cpu.v()},
+            };
+            for (const auto& fv : optics_vars)
+            {
+                auto nc_var = nc_grp_optics.add_variable<Float>(fv.nc_name, fv.dims);
+                nc_var.insert(*fv.data, fv.offsets);
+                nc_var.add_attribute("long_name", fv.long_name);
+                nc_var.add_attribute("units",     fv.units);
+            }
         }
 
         if (switch_sw_plane_parallel)
         {
-            auto nc_sw_flux_up     = nc_grp_planeparallel.add_variable<Float>("sw_flux_up"    , {"lev", "y", "x"});
-            auto nc_sw_flux_dn     = nc_grp_planeparallel.add_variable<Float>("sw_flux_dn"    , {"lev", "y", "x"});
-            auto nc_sw_flux_dn_dir = nc_grp_planeparallel.add_variable<Float>("sw_flux_dn_dir", {"lev", "y", "x"});
-            auto nc_sw_flux_net    = nc_grp_planeparallel.add_variable<Float>("sw_flux_net"   , {"lev", "y", "x"});
 
-            nc_sw_flux_up    .insert(sw_flux_up_cpu    .v(), {0, 0, 0});
-            nc_sw_flux_dn    .insert(sw_flux_dn_cpu    .v(), {0, 0, 0});
-            nc_sw_flux_dn_dir.insert(sw_flux_dn_dir_cpu.v(), {0, 0, 0});
-            nc_sw_flux_net   .insert(sw_flux_net_cpu   .v(), {0, 0, 0});
+            std::string gpt_suffix = sw_single_gpt > 0 ? " (g-point "+std::to_string(sw_single_gpt)+")" : " (broadband)";
 
-            nc_sw_flux_up.add_attribute("long_name","Upwelling shortwave fluxes (TwoStream solver)");
-            nc_sw_flux_up.add_attribute("units","W m-2");
+            const std::vector<nc_outvar> flux_vars =
+            {
+                nc_outvar{"sw_flux_up",     "Upwelling shortwave fluxes" + gpt_suffix, "W m-2", "Two-stream solver", {"lev","y","x"}, {0,0,0}, sw_flux_up_cpu    .v()},
+                nc_outvar{"sw_flux_dn",     "Downwelling shortwave fluxes" + gpt_suffix, "W m-2", "Two-stream solver", {"lev","y","x"}, {0,0,0}, sw_flux_dn_cpu    .v()},
+                nc_outvar{"sw_flux_dn_dir", "Downwelling direct shortwave fluxes" + gpt_suffix, "W m-2", "Two-stream solver", {"lev","y","x"}, {0,0,0}, sw_flux_dn_dir_cpu.v()},
+                nc_outvar{"sw_flux_net",    "Net shortwave fluxes" + gpt_suffix,                "W m-2", "Two-stream solver", {"lev","y","x"}, {0,0,0}, sw_flux_net_cpu   .v()},
+            };
 
-            nc_sw_flux_dn.add_attribute("long_name","Downwelling shortwave fluxes (TwoStream solver)");
-            nc_sw_flux_dn.add_attribute("units","W m-2");
-
-            nc_sw_flux_dn_dir.add_attribute("long_name","Downwelling direct shortwave fluxes (TwoStream solver)");
-            nc_sw_flux_dn_dir.add_attribute("units","W m-2");
-
-            nc_sw_flux_net.add_attribute("long_name","Net shortwave fluxes (TwoStream solver)");
-            nc_sw_flux_net.add_attribute("units","W m-2");
+            for (const auto& fv : flux_vars)
+            {
+                auto nc_var = nc_grp_planeparallel.add_variable<Float>(fv.nc_name, fv.dims);
+                nc_var.insert(*fv.data, fv.offsets);
+                nc_var.add_attribute("long_name", fv.long_name);
+                nc_var.add_attribute("units",     fv.units);
+                nc_var.add_attribute("solver", fv.solver);
+            }
         }
 
         if (switch_sw_raytracing)
         {
-            auto nc_rt_flux_tod_up  = nc_grp_forward.add_variable<Float>("sw_flux_tod_up",  {"y","x"});
-            auto nc_rt_flux_sfc_dir = nc_grp_forward.add_variable<Float>("sw_flux_sfc_dir", {"y","x"});
-            auto nc_rt_flux_sfc_dif = nc_grp_forward.add_variable<Float>("sw_flux_sfc_dif", {"y","x"});
-            auto nc_rt_flux_sfc_up  = nc_grp_forward.add_variable<Float>("sw_flux_sfc_up",  {"y","x"});
-            auto nc_rt_flux_abs_dir = nc_grp_forward.add_variable<Float>("sw_flux_abs_dir", {"z","y","x"});
-            auto nc_rt_flux_abs_dif = nc_grp_forward.add_variable<Float>("sw_flux_abs_dif", {"z","y","x"});
+            std::string gpt_suffix = sw_single_gpt > 0 ? " (g-point "+std::to_string(sw_single_gpt)+")" : " (broadband)";
 
-            nc_rt_flux_tod_up .insert(rt_flux_tod_up_cpu .v(), {0,0});
-            nc_rt_flux_sfc_dir.insert(rt_flux_sfc_dir_cpu.v(), {0,0});
-            nc_rt_flux_sfc_dif.insert(rt_flux_sfc_dif_cpu.v(), {0,0});
-            nc_rt_flux_sfc_up .insert(rt_flux_sfc_up_cpu .v(), {0,0});
+            const std::vector<nc_outvar> flux_vars =
+            {
+                nc_outvar{"sw_flux_tod_up",  "Upwelling shortwave top-of-domain fluxes"     + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"}, {0,0},   rt_flux_tod_up_cpu .v()},
+                nc_outvar{"sw_flux_sfc_dir", "Downwelling direct shortwave surface fluxes"  + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"}, {0,0},   rt_flux_sfc_dir_cpu.v()},
+                nc_outvar{"sw_flux_sfc_dif", "Downwelling diffuse shortwave surface fluxes" + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"}, {0,0},   rt_flux_sfc_dif_cpu.v()},
+                nc_outvar{"sw_flux_sfc_up",  "Upwelling shortwave surface fluxes"           + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"}, {0,0},   rt_flux_sfc_up_cpu .v()},
+                nc_outvar{"sw_flux_abs_dir", "Absorbed direct shortwave fluxes"             + gpt_suffix, "W m-3", "Monte Carlo ray tracer", {"z","y","x"}, {0,0,0}, rt_flux_abs_dir_cpu.v()},
+                nc_outvar{"sw_flux_abs_dif", "Absorbed diffuse shortwave fluxes"            + gpt_suffix, "W m-3", "Monte Carlo ray tracer", {"z","y","x"}, {0,0,0}, rt_flux_abs_dif_cpu.v()},
+            };
 
-            nc_rt_flux_abs_dir.insert(rt_flux_abs_dir_cpu.v(), {0,0,0});
-            nc_rt_flux_abs_dif.insert(rt_flux_abs_dif_cpu.v(), {0,0,0});
-
-            nc_rt_flux_tod_up.add_attribute("long_name","Upwelling shortwave top-of-domain fluxes (Monte Carlo ray tracer)");
-            nc_rt_flux_tod_up.add_attribute("units","W m-2");
-
-            nc_rt_flux_sfc_dir.add_attribute("long_name","Downwelling direct shortwave surface fluxes (Monte Carlo ray tracer)");
-            nc_rt_flux_sfc_dir.add_attribute("units","W m-2");
-
-            nc_rt_flux_sfc_dif.add_attribute("long_name","Downwelling diffuse shortwave surface fluxes (Monte Carlo ray tracer)");
-            nc_rt_flux_sfc_dif.add_attribute("units","W m-2");
-
-            nc_rt_flux_sfc_up.add_attribute("long_name","Upwelling shortwave surface fluxes (Monte Carlo ray tracer)");
-            nc_rt_flux_sfc_up.add_attribute("units","W m-2");
-
-            nc_rt_flux_abs_dir.add_attribute("long_name","Absorbed direct shortwave fluxes (Monte Carlo ray tracer)");
-            nc_rt_flux_abs_dir.add_attribute("units","W m-3");
-
-            nc_rt_flux_abs_dif.add_attribute("long_name","Absorbed diffuse shortwave fluxes (Monte Carlo ray tracer)");
-            nc_rt_flux_abs_dif.add_attribute("units","W m-3");
+            for (const auto& fv : flux_vars)
+            {
+                auto nc_var = nc_grp_forward.add_variable<Float>(fv.nc_name, fv.dims);
+                nc_var.insert(*fv.data, fv.offsets);
+                nc_var.add_attribute("long_name", fv.long_name);
+                nc_var.add_attribute("units",     fv.units);
+                nc_var.add_attribute("solver",    fv.solver);
+            }
         }
     }
 
