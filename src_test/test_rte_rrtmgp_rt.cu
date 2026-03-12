@@ -222,7 +222,7 @@ void solve_radiation(int argc, char** argv)
     // solve broadband radiances
     const bool switch_broadband         = get_ini_value<bool>(settings, "backward", "broadband", false);
     // output additional cloud statistics for each camera pixel
-    const bool switch_cloud_cam         = get_ini_value<bool>(settings, "backward", "cloud_cam", false);
+    bool switch_cloud_cam         = get_ini_value<bool>(settings, "backward", "cloud_cam", false);
 
     // if >0, overwrite zenith angle from input netcdf file
     Float input_sza = get_ini_value<Float>(settings, "solar_angles", "sza", -1.0);
@@ -268,7 +268,7 @@ void solve_radiation(int argc, char** argv)
         throw std::runtime_error(error);
     }
 
-    if ((switch_bw_raytracing || switch_cloud_cam) && switch_tilted_columns)
+    if (switch_bw_raytracing && switch_tilted_columns)
     {
         std::string error = "Disable backward mode if tilted columns are switched on";
         throw std::runtime_error(error);
@@ -484,6 +484,49 @@ void solve_radiation(int argc, char** argv)
     if (input_azi > 0)
         azi.fill(input_azi / Float(180.0) * M_PI);
 
+    // read spectral information
+    int n_gpt_lw = 0;
+    int n_bnd_lw = 0;
+    int n_gpt_sw = 0;
+    int n_bnd_sw = 0;
+    if (switch_longwave)
+    {
+        Netcdf_file coef_nc_lw("coefficients_lw.nc", Netcdf_mode::Read);
+        n_bnd_lw = std::max(coef_nc_lw.get_dimension_size("bnd"), n_bnd_lw);
+        n_gpt_lw = std::max(coef_nc_lw.get_dimension_size("gpt"), n_gpt_lw);
+    }
+    if (switch_shortwave)
+    {
+        Netcdf_file coef_nc_sw("coefficients_sw.nc", Netcdf_mode::Read);
+        n_bnd_sw = std::max(coef_nc_sw.get_dimension_size("bnd"), n_bnd_sw);
+        n_gpt_sw = std::max(coef_nc_sw.get_dimension_size("gpt"), n_gpt_sw);
+    }
+
+    // read boundary conditions
+    Array<Float,2> sfc_alb_dir;
+    Array<Float,2> sfc_alb_dif;
+    Array<Float,2> emis_sfc;
+    Array<Float,1> t_sfc;
+
+    if (switch_shortwave || switch_bw_raytracing)
+    {
+        sfc_alb_dir.set_dims({n_bnd_sw, n_col});
+        sfc_alb_dif.set_dims({n_bnd_sw, n_col});
+
+        sfc_alb_dir = input_nc.get_variable<Float>("sfc_alb_dir", {n_col_y, n_col_x, n_bnd_sw});
+        sfc_alb_dif = input_nc.get_variable<Float>("sfc_alb_dif", {n_col_y, n_col_x, n_bnd_sw});
+    }
+
+    if (switch_longwave)
+    {
+        emis_sfc.set_dims({n_bnd_lw, n_col});
+        t_sfc.set_dims({n_col});
+
+        emis_sfc = input_nc.get_variable<Float>("emis_sfc", {n_col_y, n_col_x, n_bnd_lw});
+        t_sfc = input_nc.get_variable<Float>("t_sfc", {n_col_y, n_col_x});
+    }
+
+    ///// TILTED COLUMNS IF DESIRED /////
     Float tica_sza;
     Float tica_azi;
     if (switch_tilted_columns)
@@ -633,22 +676,38 @@ void solve_radiation(int argc, char** argv)
     if (switch_shortwave || switch_bw_raytracing)
         Netcdf_file coef_nc_sw("coefficients_sw.nc", Netcdf_mode::Read);
 
+    ////// COPY MOST VARIABLES TO GPU //////
+    Array_gpu<Float,2> p_lay_gpu(p_lay);
+    Array_gpu<Float,2> p_lev_gpu(p_lev);
+    Array_gpu<Float,2> t_lay_gpu(t_lay);
+    Array_gpu<Float,2> t_lev_gpu(t_lev);
+    Array_gpu<Float,2> col_dry_gpu(col_dry);
+    Array_gpu<Float,1> t_sfc_gpu(t_sfc);
+    Array_gpu<Float,2> emis_sfc_gpu(emis_sfc);
+    Array_gpu<Float,2> lwp_gpu(lwp);
+    Array_gpu<Float,2> iwp_gpu(iwp);
+    Array_gpu<Float,2> rel_gpu(rel);
+    Array_gpu<Float,2> dei_gpu(dei);
+    Array_gpu<Float,2> rh_gpu(rh);
+
+    Array_gpu<Float,2> sfc_alb_dir_gpu(sfc_alb_dir);
+    Array_gpu<Float,2> sfc_alb_dif_gpu(sfc_alb_dif);
+    Array_gpu<Float,1> mu0_gpu(mu0);
+    Array_gpu<Float,1> azi_gpu(azi);
+
+    Array_gpu<Float,1> z_lev_gpu(z_lev);
+    Array_gpu<Float,1> land_use_map_gpu(land_use_map);
+
+    Gas_concs_gpu gas_concs_gpu(gas_concs);
+
+    Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
+
     ////// RUN THE LONGWAVE SOLVER //////
     if (switch_longwave)
     {
         // Initialize the solver.
         Status::print_message("Initializing the longwave solver.");
-
-        Gas_concs_gpu gas_concs_gpu(gas_concs);
-
         Radiation_solver_longwave rad_lw(gas_concs_gpu, "coefficients_lw.nc", "cloud_coefficients_lw.nc", "aerosol_optics_lw.nc");
-
-        // Read the boundary conditions.
-        const int n_bnd_lw = rad_lw.get_n_bnd_gpu();
-        const int n_gpt_lw = rad_lw.get_n_gpt_gpu();
-
-        Array<Float,2> emis_sfc(input_nc.get_variable<Float>("emis_sfc", {n_col_y, n_col_x, n_bnd_lw}), {n_bnd_lw, n_col});
-        Array<Float,1> t_sfc(input_nc.get_variable<Float>("t_sfc", {n_col_y, n_col_x}), {n_col});
 
         // Create output arrays.
         Array_gpu<Float,2> lw_tau_tot;
@@ -713,23 +772,6 @@ void solve_radiation(int argc, char** argv)
         auto run_solver = [&]()
         {
             const Vector<int> grid_cells = {n_col_x, n_col_y, n_z_in};
-
-            Array_gpu<Float,2> p_lay_gpu(p_lay);
-            Array_gpu<Float,2> p_lev_gpu(p_lev);
-            Array_gpu<Float,2> t_lay_gpu(t_lay);
-            Array_gpu<Float,2> t_lev_gpu(t_lev);
-            Array_gpu<Float,2> col_dry_gpu(col_dry);
-            Array_gpu<Float,1> t_sfc_gpu(t_sfc);
-            Array_gpu<Float,2> emis_sfc_gpu(emis_sfc);
-            Array_gpu<Float,2> lwp_gpu(lwp);
-            Array_gpu<Float,2> iwp_gpu(iwp);
-            Array_gpu<Float,2> rel_gpu(rel);
-            Array_gpu<Float,2> dei_gpu(dei);
-            Array_gpu<Float,2> rh_gpu(rh);
-
-            // note: aerosol optics not yet implemented in LW
-            Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
-
 
             cudaDeviceSynchronize();
             cudaEvent_t start;
@@ -905,21 +947,7 @@ void solve_radiation(int argc, char** argv)
         // Initialize the solver.
         Status::print_message("Initializing the shortwave solver.");
 
-        Gas_concs_gpu gas_concs_gpu(gas_concs);
         Radiation_solver_shortwave rad_sw(gas_concs_gpu, "coefficients_sw.nc", "cloud_coefficients_sw.nc", "aerosol_optics_sw.nc");
-
-        // Read the boundary conditions.
-        const int n_bnd_sw = rad_sw.get_n_bnd_gpu();
-        const int n_gpt_sw = rad_sw.get_n_gpt_gpu();
-
-        //load Mie LUT first
-        if (switch_cloud_mie)
-        {
-            rad_sw.load_mie_tables("mie_lut_broadband.nc");
-        }
-
-        Array<Float,2> sfc_alb_dir(input_nc.get_variable<Float>("sfc_alb_dir", {n_col_y, n_col_x, n_bnd_sw}), {n_bnd_sw, n_col});
-        Array<Float,2> sfc_alb_dif(input_nc.get_variable<Float>("sfc_alb_dif", {n_col_y, n_col_x, n_bnd_sw}), {n_bnd_sw, n_col});
 
         Array<Float,1> tsi_scaling({n_col});
         if (input_nc.variable_exists("tsi"))
@@ -937,6 +965,12 @@ void solve_radiation(int argc, char** argv)
         else
         {
             tsi_scaling.fill(Float(1.));
+        }
+
+        //load Mie LUT first
+        if (switch_cloud_mie)
+        {
+            rad_sw.load_mie_tables("mie_lut_broadband.nc");
         }
 
         if (switch_tilted_columns)
@@ -1000,7 +1034,7 @@ void solve_radiation(int argc, char** argv)
             rt_flux_abs_dif.set_dims({n_col_x, n_col_y, n_z});
         }
 
-
+        Array_gpu<Float,1> tsi_scaling_gpu(tsi_scaling);
 
         // Solve the radiation.
         Status::print_message("Solving the shortwave radiation.");
@@ -1008,24 +1042,6 @@ void solve_radiation(int argc, char** argv)
         auto run_solver = [&]()
         {
             const Vector<int> grid_cells = {n_col_x, n_col_y, n_z};
-
-            Array_gpu<Float,2> p_lay_gpu(p_lay);
-            Array_gpu<Float,2> p_lev_gpu(p_lev);
-            Array_gpu<Float,2> t_lay_gpu(t_lay);
-            Array_gpu<Float,2> t_lev_gpu(t_lev);
-            Array_gpu<Float,2> col_dry_gpu(col_dry);
-            Array_gpu<Float,2> sfc_alb_dir_gpu(sfc_alb_dir);
-            Array_gpu<Float,2> sfc_alb_dif_gpu(sfc_alb_dif);
-            Array_gpu<Float,1> tsi_scaling_gpu(tsi_scaling);
-            Array_gpu<Float,1> mu0_gpu(mu0);
-            Array_gpu<Float,1> azi_gpu(azi);
-            Array_gpu<Float,2> lwp_gpu(lwp);
-            Array_gpu<Float,2> iwp_gpu(iwp);
-            Array_gpu<Float,2> rel_gpu(rel);
-            Array_gpu<Float,2> dei_gpu(dei);
-
-            Array_gpu<Float,2> rh_gpu(rh);
-            Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
 
             cudaDeviceSynchronize();
             cudaEvent_t start;
@@ -1134,7 +1150,6 @@ void solve_radiation(int argc, char** argv)
 
         if (switch_sw_plane_parallel)
         {
-
             std::string gpt_suffix = sw_single_gpt > 0 ? " (g-point "+std::to_string(sw_single_gpt)+")" : " (broadband)";
 
             const std::vector<nc_outvar> flux_vars =
@@ -1181,19 +1196,16 @@ void solve_radiation(int argc, char** argv)
     }
 
     ////// RUN THE BACKWARD SOLVER //////
-    if  (switch_bw_raytracing || switch_cloud_cam)
+    if  (switch_bw_raytracing)
     {
          // Initialize the solver.
         Status::print_message("Initializing the shortwave backward solver.");
 
-        Gas_concs_gpu gas_concs_gpu(gas_concs);
         Radiation_solver_bw_shortwave rad_sw(gas_concs_gpu, "coefficients_sw.nc", "cloud_coefficients_sw.nc","aerosol_optics_sw.nc");
 
         // Read the boundary conditions.
         const int n_bnd_sw = rad_sw.get_n_bnd_gpu();
         const int n_gpt_sw = rad_sw.get_n_gpt_gpu();
-
-        Array<Float,2> sfc_alb(input_nc.get_variable<Float>("sfc_alb_dir", {n_col_y, n_col_x, n_bnd_sw}), {n_bnd_sw, n_col});
 
         Array<Float,1> tsi_scaling({n_col});
         if (input_nc.variable_exists("tsi"))
@@ -1244,39 +1256,22 @@ void solve_radiation(int argc, char** argv)
 
             if (!switch_liquid_cloud_optics)
             {
-                lwp.set_dims({n_col, n_lay});
-                lwp.fill(Float(0.));
+                lwp_gpu.set_dims({n_col, n_lay});
+                lwp_gpu.fill(Float(0.));
             }
             if (!switch_ice_cloud_optics)
             {
-                iwp.set_dims({n_col, n_lay});
-                iwp.fill(Float(0.));
+                iwp_gpu.set_dims({n_col, n_lay});
+                iwp_gpu.fill(Float(0.));
             }
         }
 
         const Vector<int> grid_cells = {n_col_x, n_col_y, n_z_in};
 
+        Array_gpu<Float,1> tsi_scaling_gpu(tsi_scaling);
+
         auto run_solver_bb = [&]()
         {
-            Array_gpu<Float,2> p_lay_gpu(p_lay);
-            Array_gpu<Float,2> p_lev_gpu(p_lev);
-            Array_gpu<Float,2> t_lay_gpu(t_lay);
-            Array_gpu<Float,2> t_lev_gpu(t_lev);
-            Array_gpu<Float,1> z_lev_gpu(z_lev);
-            Array_gpu<Float,2> col_dry_gpu(col_dry);
-            Array_gpu<Float,2> sfc_alb_gpu(sfc_alb);
-            Array_gpu<Float,1> tsi_scaling_gpu(tsi_scaling);
-            Array_gpu<Float,1> mu0_gpu(mu0);
-            Array_gpu<Float,1> azi_gpu(azi);
-            Array_gpu<Float,2> lwp_gpu(lwp);
-            Array_gpu<Float,2> iwp_gpu(iwp);
-            Array_gpu<Float,2> rel_gpu(rel);
-            Array_gpu<Float,2> dei_gpu(dei);
-            Array_gpu<Float,2> rh_gpu(rh);
-            Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
-
-            Array_gpu<Float,1> land_use_map_gpu(land_use_map);
-
             cudaDeviceSynchronize();
             cudaEvent_t start;
             cudaEvent_t stop;
@@ -1303,7 +1298,7 @@ void solve_radiation(int argc, char** argv)
                     t_lay_gpu, t_lev_gpu,
                     z_lev_gpu,
                     col_dry_gpu,
-                    sfc_alb_gpu,
+                    sfc_alb_dir_gpu,
                     tsi_scaling_gpu,
                     mu0_gpu, azi_gpu,
                     lwp_gpu, iwp_gpu,
@@ -1331,26 +1326,6 @@ void solve_radiation(int argc, char** argv)
 
         auto run_solver = [&]()
         {
-            Array_gpu<Float,2> p_lay_gpu(p_lay);
-            Array_gpu<Float,2> p_lev_gpu(p_lev);
-            Array_gpu<Float,2> t_lay_gpu(t_lay);
-            Array_gpu<Float,2> t_lev_gpu(t_lev);
-            Array_gpu<Float,1> z_lev_gpu(z_lev);
-            Array_gpu<Float,2> col_dry_gpu(col_dry);
-            Array_gpu<Float,2> sfc_alb_gpu(sfc_alb);
-            Array_gpu<Float,1> tsi_scaling_gpu(tsi_scaling);
-            Array_gpu<Float,1> mu0_gpu(mu0);
-            Array_gpu<Float,1> azi_gpu(azi);
-            Array_gpu<Float,2> lwp_gpu(lwp);
-            Array_gpu<Float,2> iwp_gpu(iwp);
-            Array_gpu<Float,2> rel_gpu(rel);
-            Array_gpu<Float,2> dei_gpu(dei);
-
-            Array_gpu<Float,2> rh_gpu(rh);
-            Aerosol_concs_gpu aerosol_concs_gpu(aerosol_concs);
-
-            Array_gpu<Float,1> land_use_map_gpu(land_use_map);
-
             cudaDeviceSynchronize();
             cudaEvent_t start;
             cudaEvent_t stop;
@@ -1366,7 +1341,7 @@ void solve_radiation(int argc, char** argv)
                     switch_lu_albedo,
                     switch_delta_cloud,
                     switch_delta_aerosol,
-                    switch_cloud_cam,
+                    switch_broadband ? false : switch_cloud_cam,
                     switch_bw_raytracing,
                     grid_cells,
                     grid_d,
@@ -1377,7 +1352,7 @@ void solve_radiation(int argc, char** argv)
                     t_lay_gpu, t_lev_gpu,
                     z_lev_gpu,
                     col_dry_gpu,
-                    sfc_alb_gpu,
+                    sfc_alb_dir_gpu,
                     tsi_scaling_gpu,
                     mu0_gpu, azi_gpu,
                     lwp_gpu, iwp_gpu,
