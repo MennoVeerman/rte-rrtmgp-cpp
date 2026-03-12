@@ -634,17 +634,15 @@ void solve_radiation(int argc, char** argv)
 
     Netcdf_file output_nc(case_name + "_output.nc", Netcdf_mode::Create);
 
-    //output_nc.add_dimension("col", n_col);
     output_nc.add_dimension("x", n_col_x);
     output_nc.add_dimension("y", n_col_y);
     output_nc.add_dimension("z", n_z_in);
     output_nc.add_dimension("lay", n_lay);
     output_nc.add_dimension("lev", n_lev);
-    output_nc.add_dimension("pair", 2);
 
     Netcdf_group nc_grp_forward = output_nc.add_group("rt_forward");
     Netcdf_group nc_grp_backward = output_nc.add_group("rt_backward");
-    Netcdf_group nc_grp_planeparallel = output_nc.add_group("rt_planeparallel");
+    Netcdf_group nc_grp_planeparallel = output_nc.add_group("planeparallel");
     Netcdf_group nc_grp_optics = output_nc.add_group("optical_properties");
 
     auto nc_x = output_nc.add_variable<Float>("x", {"x"});
@@ -927,11 +925,11 @@ void solve_radiation(int argc, char** argv)
         {
             const std::vector<nc_outvar> flux_vars =
             {
-                nc_outvar{"rt_lw_flux_tod_up", "Upwelling longwave top-of-domain fluxes" + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_tod_up_cpu.v()},
-                nc_outvar{"rt_lw_flux_tod_dn", "Downwelling longwave top-of-domain fluxes" + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_tod_dn_cpu.v()},
-                nc_outvar{"rt_lw_flux_sfc_up", "Upwelling longwave surface fluxes" + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_sfc_up_cpu.v()},
-                nc_outvar{"rt_lw_flux_sfc_dn", "Downwelling longwave surface fluxes" + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_sfc_dn_cpu.v()},
-                nc_outvar{"rt_lw_flux_abs",    "Absorbed longwave fluxes" + gpt_suffix, "W m-3", "Monte Carlo ray tracer", {"z","y","x"}, {0,0,0}, rt_flux_abs_cpu.v()},
+                nc_outvar{"lw_flux_tod_up", "Upwelling longwave top-of-domain fluxes" + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_tod_up_cpu.v()},
+                nc_outvar{"lw_flux_tod_dn", "Downwelling longwave top-of-domain fluxes" + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_tod_dn_cpu.v()},
+                nc_outvar{"lw_flux_sfc_up", "Upwelling longwave surface fluxes" + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_sfc_up_cpu.v()},
+                nc_outvar{"lw_flux_sfc_dn", "Downwelling longwave surface fluxes" + gpt_suffix, "W m-2", "Monte Carlo ray tracer", {"y","x"},     {0,0},   rt_flux_sfc_dn_cpu.v()},
+                nc_outvar{"lw_flux_abs",    "Absorbed longwave fluxes" + gpt_suffix, "W m-3", "Monte Carlo ray tracer", {"z","y","x"}, {0,0,0}, rt_flux_abs_cpu.v()},
             };
             for (const auto& fv : flux_vars)
             {
