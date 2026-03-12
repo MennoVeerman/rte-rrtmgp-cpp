@@ -213,9 +213,9 @@ void solve_radiation(int argc, char** argv)
     const bool switch_cloud_cam         = get_ini_value<bool>(settings, "backward", "cloud_cam", false);
 
     // if >0, overwrite zenith angle from input netcdf file
-    const Float input_sza = get_ini_value<Float>(settings, "solar_angles", "sza", -1.0);
+    Float input_sza = get_ini_value<Float>(settings, "solar_angles", "sza", -1.0);
     // if >0, overwrite azimuth angle from input netcdf file
-    const Float input_azi = get_ini_value<Float>(settings, "solar_angles", "azi", -1.0);
+    Float input_azi = get_ini_value<Float>(settings, "solar_angles", "azi", -1.0);
 
     Camera camera;
     if (switch_bw_raytracing)
@@ -253,6 +253,12 @@ void solve_radiation(int argc, char** argv)
     if (switch_longwave && !(switch_lw_plane_parallel || switch_lw_raytracing))
     {
         std::string error = "With longwave enabled, need to run longwave plane parallel solver and/or ray tracer ";
+        throw std::runtime_error(error);
+    }
+
+    if ((switch_bw_raytracing || switch_cloud_cam) && switch_tilted_columns)
+    {
+        std::string error = "Disable backward mode if tilted columns are switched on";
         throw std::runtime_error(error);
     }
 
@@ -334,6 +340,7 @@ void solve_radiation(int argc, char** argv)
     Array<Float,1> grid_yh(input_nc.get_variable<Float>("yh", {n_col_y+1}), {n_col_y+1});
     Array<Float,1> grid_z(input_nc.get_variable<Float>("z", {n_z_in}), {n_z_in});
     Array<Float,1> z_lev(input_nc.get_variable<Float>("z_lev", {n_lev}), {n_lev});
+    Array<Float,1> z_lay(input_nc.get_variable<Float>("z_lay", {n_lay}), {n_lay});
 
     const Vector<Float> grid_d = {grid_xh({2}) - grid_xh({1}), grid_yh({2}) - grid_yh({1}), grid_z({2}) - grid_z({1})};
     const Vector<int> kn_grid = {input_nc.get_variable<int>("ngrid_x"),
@@ -364,9 +371,9 @@ void solve_radiation(int argc, char** argv)
     // read land use map if present, used for choosing between spectral and lambertian reflection and for spectral albedo
     // 0: water, 1: "grass", 2: "soil", 3: "concrete". Interpolating between 1 and 2 is currently possible
     Array<Float,1> land_use_map({n_col});
-    if (input_nc.variable_exists("land_use_map") && switch_lu_albedo)
+    if (input_nc.variable_exists("land_use_type") && switch_lu_albedo)
     {
-        land_use_map = std::move(input_nc.get_variable<Float>("land_use_map", {n_col_y, n_col_x}));
+        land_use_map = std::move(input_nc.get_variable<Float>("land_use_type", {n_col_y, n_col_x}));
     }
     else
     {
@@ -455,28 +462,22 @@ void solve_radiation(int argc, char** argv)
     Array<Float,1> mu0({n_col});
     Array<Float,1> azi({n_col});
 
-    Float tica_sza;
-    Float tica_azi;
-
     mu0 = input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x});
     azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
 
-    if (input_sza < 0)
+    // overwrite mu0 and azi if solar angles are provided in ini
+    if (input_sza > 0)
         mu0.fill(cos(input_sza / Float(180.0) * M_PI));
 
-    if (input_azi < 0)
+    if (input_azi > 0)
         azi.fill(input_azi / Float(180.0) * M_PI);
 
-
+    Float tica_sza;
+    Float tica_azi;
     if (switch_tilted_columns)
     {
         tica_sza = acos(mu0.v()[0]);
         tica_azi = azi.v()[0];
-        for (int icol=1; icol<=n_col; ++icol)
-        {
-            mu0({icol}) = 1.0;
-            azi({icol}) = 0.0;
-        }
 
         std::vector<std::string> gas_names = {
             "h2o", "co2", "o3", "n2o", "co", "ch4", "o2", "n2", "ccl4", "cfc11",
@@ -572,21 +573,25 @@ void solve_radiation(int argc, char** argv)
 
     }
 
-
     ////// CREATE THE OUTPUT FILE //////
     // Create the general dimensions and arrays.
     Status::print_message("Preparing NetCDF output file.");
 
     Netcdf_file output_nc(case_name + "_output.nc", Netcdf_mode::Create);
-    output_nc.add_dimension("col", n_col);
 
+    //output_nc.add_dimension("col", n_col);
     output_nc.add_dimension("x", n_col_x);
     output_nc.add_dimension("y", n_col_y);
+    output_nc.add_dimension("z", n_z_in);
     output_nc.add_dimension("lay", n_lay);
     output_nc.add_dimension("lev", n_lev);
     output_nc.add_dimension("pair", 2);
 
-    output_nc.add_dimension("z", n_z_in);
+    Netcdf_group nc_grp_forward = output_nc.add_group("rt_forward");
+    Netcdf_group nc_grp_backward = output_nc.add_group("rt_backward");
+    Netcdf_group nc_grp_planeparallel = output_nc.add_group("rt_planeparallel");
+    Netcdf_group nc_grp_optics = output_nc.add_group("optical_properties");
+
     auto nc_x = output_nc.add_variable<Float>("x", {"x"});
     auto nc_y = output_nc.add_variable<Float>("y", {"y"});
     auto nc_z = output_nc.add_variable<Float>("z", {"z"});
@@ -594,42 +599,27 @@ void solve_radiation(int argc, char** argv)
     nc_y.insert(grid_y.v(), {0});
     nc_z.insert(grid_z.v(), {0});
 
-    auto nc_lay = output_nc.add_variable<Float>("p_lay", {"lay", "col"});
-    auto nc_lev = output_nc.add_variable<Float>("p_lev", {"lev", "col"});
+    auto nc_play = output_nc.add_variable<Float>("p_lay", {"lay", "y", "x"});
+    auto nc_plev = output_nc.add_variable<Float>("p_lev", {"lev", "y", "x"});
+    auto nc_zlev = output_nc.add_variable<Float>("lev", {"lev"});
+    auto nc_zlay = output_nc.add_variable<Float>("lay", {"lay"});
 
-    nc_lay.insert(p_lay.v(), {0, 0});
-    nc_lev.insert(p_lev.v(), {0, 0});
+    nc_play.insert(p_lay.v(), {0, 0, 0});
+    nc_plev.insert(p_lev.v(), {0, 0, 0});
+    nc_zlev.insert(z_lev.v(), {0});
+    nc_zlay.insert(z_lay.v(), {0});
 
-    int ngpts = 0;
-    int nbnds = 0;
+    auto nc_mu0 = output_nc.add_variable<Float>("sza");
+    auto nc_azi = output_nc.add_variable<Float>("azi");
+
+    nc_mu0.insert(acos(mu0({1}))/M_PI * Float(180.), {0});
+    nc_azi.insert(azi({1})/M_PI * Float(180.), {0});
+
     if (switch_longwave)
-    {
         Netcdf_file coef_nc_lw("coefficients_lw.nc", Netcdf_mode::Read);
-        nbnds = std::max(coef_nc_lw.get_dimension_size("bnd"), nbnds);
-        ngpts = std::max(coef_nc_lw.get_dimension_size("gpt"), ngpts);
 
-        output_nc.add_dimension("gpt_lw", ngpts);
-        output_nc.add_dimension("band_lw", nbnds);
-
-    }
     if (switch_shortwave || switch_bw_raytracing)
-    {
         Netcdf_file coef_nc_sw("coefficients_sw.nc", Netcdf_mode::Read);
-        nbnds = std::max(coef_nc_sw.get_dimension_size("bnd"), nbnds);
-        ngpts = std::max(coef_nc_sw.get_dimension_size("gpt"), ngpts);
-
-        output_nc.add_dimension("gpt_sw", ngpts);
-        output_nc.add_dimension("band_sw", nbnds);
-    }
-
-    if (switch_bw_raytracing)
-    {
-        output_nc.add_dimension("px", camera.nx);
-        output_nc.add_dimension("py", camera.ny);
-    }
-
-    configure_memory_pool(n_lay, n_col, 1024, ngpts, nbnds);
-
 
     ////// RUN THE LONGWAVE SOLVER //////
     if (switch_longwave)
@@ -705,9 +695,7 @@ void solve_radiation(int argc, char** argv)
             rt_flux_abs   .set_dims({n_col_x, n_col_y, n_zh_in});
         }
 
-
         // Solve the radiation.
-
         Status::print_message("Solving the longwave radiation.");
 
         auto run_solver = [&]()
@@ -815,45 +803,39 @@ void solve_radiation(int argc, char** argv)
         Array<Float,2> rt_flux_sfc_dn_cpu(rt_flux_sfc_dn);
         Array<Float,3> rt_flux_abs_cpu(rt_flux_abs);
 
-        auto nc_lw_band_lims_wvn = output_nc.add_variable<Float>("lw_band_lims_wvn", {"band_lw", "pair"});
-        nc_lw_band_lims_wvn.insert(rad_lw.get_band_lims_wavenumber_gpu().v(), {0, 0});
-
         if (lw_single_gpt > 0)
         {
-            auto nc_lw_band_lims_gpt = output_nc.add_variable<int>("lw_band_lims_gpt", {"band_lw", "pair"});
-            nc_lw_band_lims_gpt.insert(rad_lw.get_band_lims_gpoint_gpu().v(), {0, 0});
-
-            auto nc_lw_tau_tot = output_nc.add_variable<Float>("lw_tau_tot", {"lay", "y", "x"});
+            auto nc_lw_tau_tot = nc_grp_optics.add_variable<Float>("lw_tau_tot", {"lay", "y", "x"});
             nc_lw_tau_tot.insert(lw_tau_tot_cpu.v(), {0, 0, 0});
 
-            auto nc_lw_tau_cld = output_nc.add_variable<Float>("lw_tau_cld", {"lay", "y", "x"});
+            auto nc_lw_tau_cld = nc_grp_optics.add_variable<Float>("lw_tau_cld", {"lay", "y", "x"});
             nc_lw_tau_cld.insert(lw_tau_cld_cpu.v(), {0, 0, 0});
 
-            auto nc_lw_tau_aer = output_nc.add_variable<Float>("lw_tau_aer", {"lay", "y", "x"});
+            auto nc_lw_tau_aer = nc_grp_optics.add_variable<Float>("lw_tau_aer", {"lay", "y", "x"});
             nc_lw_tau_aer.insert(lw_tau_aer_cpu.v(), {0, 0, 0});
 
             if (switch_lw_scattering)
             {
-                auto nc_lw_ssa_tot = output_nc.add_variable<Float>("lw_ssa_tot", {"lay", "y", "x"});
+                auto nc_lw_ssa_tot = nc_grp_optics.add_variable<Float>("lw_ssa_tot", {"lay", "y", "x"});
                 nc_lw_ssa_tot.insert(lw_ssa_tot_cpu.v(), {0, 0, 0});
 
-                auto nc_lw_ssa_cld = output_nc.add_variable<Float>("lw_ssa_cld", {"lay", "y", "x"});
+                auto nc_lw_ssa_cld = nc_grp_optics.add_variable<Float>("lw_ssa_cld", {"lay", "y", "x"});
                 nc_lw_ssa_cld.insert(lw_ssa_cld_cpu.v(), {0, 0, 0});
 
-                auto nc_lw_asy_cld = output_nc.add_variable<Float>("lw_asy_cld", {"lay", "y", "x"});
+                auto nc_lw_asy_cld = nc_grp_optics.add_variable<Float>("lw_asy_cld", {"lay", "y", "x"});
                 nc_lw_asy_cld.insert(lw_asy_cld_cpu.v(), {0, 0, 0});
 
-                auto nc_lw_ssa_aer = output_nc.add_variable<Float>("lw_ssa_aer", {"lay", "y", "x"});
+                auto nc_lw_ssa_aer = nc_grp_optics.add_variable<Float>("lw_ssa_aer", {"lay", "y", "x"});
                 nc_lw_ssa_aer.insert(lw_ssa_aer_cpu.v(), {0, 0, 0});
 
-                auto nc_lw_asy_aer = output_nc.add_variable<Float>("lw_asy_aer", {"lay", "y", "x"});
+                auto nc_lw_asy_aer = nc_grp_optics.add_variable<Float>("lw_asy_aer", {"lay", "y", "x"});
                 nc_lw_asy_aer.insert(lw_asy_aer_cpu.v(), {0, 0, 0});
 
             }
-            auto nc_lay_source     = output_nc.add_variable<Float>("lay_source"    , {"lay", "y", "x"});
-            auto nc_lev_source = output_nc.add_variable<Float>("lev_source", {"lev", "y", "x"});
+            auto nc_lay_source = nc_grp_optics.add_variable<Float>("lay_source"    , {"lay", "y", "x"});
+            auto nc_lev_source = nc_grp_optics.add_variable<Float>("lev_source", {"lev", "y", "x"});
 
-            auto nc_sfc_source = output_nc.add_variable<Float>("sfc_source", {"y", "x"});
+            auto nc_sfc_source = nc_grp_optics.add_variable<Float>("sfc_source", {"y", "x"});
 
             nc_lay_source.insert    (lay_source_cpu.v()    , {0, 0, 0});
             nc_lev_source.insert(lev_source_cpu.v(), {0, 0, 0});
@@ -863,9 +845,9 @@ void solve_radiation(int argc, char** argv)
 
         if (switch_lw_plane_parallel)
         {
-            auto nc_lw_flux_up  = output_nc.add_variable<Float>("lw_flux_up" , {"lev", "y", "x"});
-            auto nc_lw_flux_dn  = output_nc.add_variable<Float>("lw_flux_dn" , {"lev", "y", "x"});
-            auto nc_lw_flux_net = output_nc.add_variable<Float>("lw_flux_net", {"lev", "y", "x"});
+            auto nc_lw_flux_up  = nc_grp_planeparallel.add_variable<Float>("lw_flux_up" , {"lev", "y", "x"});
+            auto nc_lw_flux_dn  = nc_grp_planeparallel.add_variable<Float>("lw_flux_dn" , {"lev", "y", "x"});
+            auto nc_lw_flux_net = nc_grp_planeparallel.add_variable<Float>("lw_flux_net", {"lev", "y", "x"});
 
             nc_lw_flux_up .insert(lw_flux_up_cpu .v(), {0, 0, 0});
             nc_lw_flux_dn .insert(lw_flux_dn_cpu .v(), {0, 0, 0});
@@ -874,11 +856,11 @@ void solve_radiation(int argc, char** argv)
 
         if (switch_lw_raytracing)
         {
-            auto rt_flux_tod_up  = output_nc.add_variable<Float>("rt_lw_flux_tod_up" , { "y", "x"});
-            auto rt_flux_tod_dn  = output_nc.add_variable<Float>("rt_lw_flux_tod_dn" , { "y", "x"});
-            auto rt_flux_sfc_up  = output_nc.add_variable<Float>("rt_lw_flux_sfc_up" , { "y", "x"});
-            auto rt_flux_sfc_dn  = output_nc.add_variable<Float>("rt_lw_flux_sfc_dn" , { "y", "x"});
-            auto rt_flux_abs     = output_nc.add_variable<Float>("rt_lw_flux_abs" , {"z", "y", "x"});
+            auto rt_flux_tod_up  = nc_grp_forward.add_variable<Float>("rt_lw_flux_tod_up" , { "y", "x"});
+            auto rt_flux_tod_dn  = nc_grp_forward.add_variable<Float>("rt_lw_flux_tod_dn" , { "y", "x"});
+            auto rt_flux_sfc_up  = nc_grp_forward.add_variable<Float>("rt_lw_flux_sfc_up" , { "y", "x"});
+            auto rt_flux_sfc_dn  = nc_grp_forward.add_variable<Float>("rt_lw_flux_sfc_dn" , { "y", "x"});
+            auto rt_flux_abs     = nc_grp_forward.add_variable<Float>("rt_lw_flux_abs" , {"z", "y", "x"});
 
             rt_flux_tod_up.insert(rt_flux_tod_up_cpu.v(), {0, 0});
             rt_flux_tod_dn.insert(rt_flux_tod_dn_cpu.v(), {0, 0});
@@ -887,7 +869,6 @@ void solve_radiation(int argc, char** argv)
             rt_flux_abs   .insert(rt_flux_abs_cpu.v(), {0, 0, 0});
         }
     }
-
 
     ////// RUN THE SHORTWAVE SOLVER //////
     if (switch_shortwave)
@@ -922,19 +903,19 @@ void solve_radiation(int argc, char** argv)
         else if (input_nc.variable_exists("tsi_scaling"))
         {
             Float tsi_scaling_in = input_nc.get_variable<Float>("tsi_scaling");
-            for (int icol=1; icol<=n_col; ++icol)
-                tsi_scaling({icol}) = tsi_scaling_in;
+            tsi_scaling.fill(tsi_scaling_in);
         }
         else
         {
-            for (int icol=1; icol<=n_col; ++icol)
-                tsi_scaling({icol}) = Float(1.);
+            tsi_scaling.fill(Float(1.));
         }
 
         if (switch_tilted_columns)
         {
-            for (int icol=1; icol<=n_col; ++icol)
-                tsi_scaling({icol}) = std::cos(tica_sza);
+            tsi_scaling.fill(std::cos(tica_sza));
+
+            mu0.fill(1.0);
+            azi.fill(0.0);
         }
 
         // Create output arrays.
@@ -1097,22 +1078,16 @@ void solve_radiation(int argc, char** argv)
         Array<Float,3> rt_flux_abs_dir_cpu(rt_flux_abs_dir);
         Array<Float,3> rt_flux_abs_dif_cpu(rt_flux_abs_dif);
 
-        auto nc_sw_band_lims_wvn = output_nc.add_variable<Float>("sw_band_lims_wvn", {"band_sw", "pair"});
-        nc_sw_band_lims_wvn.insert(rad_sw.get_band_lims_wavenumber_gpu().v(), {0, 0});
-
         if (sw_single_gpt > 0)
         {
-            auto nc_sw_band_lims_gpt = output_nc.add_variable<int>("sw_band_lims_gpt", {"band_sw", "pair"});
-            nc_sw_band_lims_gpt.insert(rad_sw.get_band_lims_gpoint_gpu().v(), {0, 0});
-
-            auto nc_tot_tau = output_nc.add_variable<Float>("tot_tau"  , {"lay", "y", "x"});
-            auto nc_tot_ssa = output_nc.add_variable<Float>("tot_ssa"  , {"lay", "y", "x"});
-            auto nc_cld_tau = output_nc.add_variable<Float>("cld_tau"  , {"lay", "y", "x"});
-            auto nc_cld_ssa = output_nc.add_variable<Float>("cld_ssa"  , {"lay", "y", "x"});
-            auto nc_cld_asy = output_nc.add_variable<Float>("cld_asy"  , {"lay", "y", "x"});
-            auto nc_aer_tau = output_nc.add_variable<Float>("aer_tau"  , {"lay", "y", "x"});
-            auto nc_aer_ssa = output_nc.add_variable<Float>("aer_ssa"  , {"lay", "y", "x"});
-            auto nc_aer_asy = output_nc.add_variable<Float>("aer_asy"  , {"lay", "y", "x"});
+            auto nc_tot_tau = nc_grp_optics.add_variable<Float>("sw_tot_tau"  , {"lay", "y", "x"});
+            auto nc_tot_ssa = nc_grp_optics.add_variable<Float>("sw_tot_ssa"  , {"lay", "y", "x"});
+            auto nc_cld_tau = nc_grp_optics.add_variable<Float>("sw_cld_tau"  , {"lay", "y", "x"});
+            auto nc_cld_ssa = nc_grp_optics.add_variable<Float>("sw_cld_ssa"  , {"lay", "y", "x"});
+            auto nc_cld_asy = nc_grp_optics.add_variable<Float>("sw_cld_asy"  , {"lay", "y", "x"});
+            auto nc_aer_tau = nc_grp_optics.add_variable<Float>("sw_aer_tau"  , {"lay", "y", "x"});
+            auto nc_aer_ssa = nc_grp_optics.add_variable<Float>("sw_aer_ssa"  , {"lay", "y", "x"});
+            auto nc_aer_asy = nc_grp_optics.add_variable<Float>("sw_aer_asy"  , {"lay", "y", "x"});
 
             nc_tot_tau.insert(sw_tot_tau_cpu.v(), {0, 0, 0});
             nc_tot_ssa.insert(sw_tot_ssa_cpu.v(), {0, 0, 0});
@@ -1145,10 +1120,10 @@ void solve_radiation(int argc, char** argv)
 
         if (switch_sw_plane_parallel)
         {
-            auto nc_sw_flux_up     = output_nc.add_variable<Float>("sw_flux_up"    , {"lev", "y", "x"});
-            auto nc_sw_flux_dn     = output_nc.add_variable<Float>("sw_flux_dn"    , {"lev", "y", "x"});
-            auto nc_sw_flux_dn_dir = output_nc.add_variable<Float>("sw_flux_dn_dir", {"lev", "y", "x"});
-            auto nc_sw_flux_net    = output_nc.add_variable<Float>("sw_flux_net"   , {"lev", "y", "x"});
+            auto nc_sw_flux_up     = nc_grp_planeparallel.add_variable<Float>("sw_flux_up"    , {"lev", "y", "x"});
+            auto nc_sw_flux_dn     = nc_grp_planeparallel.add_variable<Float>("sw_flux_dn"    , {"lev", "y", "x"});
+            auto nc_sw_flux_dn_dir = nc_grp_planeparallel.add_variable<Float>("sw_flux_dn_dir", {"lev", "y", "x"});
+            auto nc_sw_flux_net    = nc_grp_planeparallel.add_variable<Float>("sw_flux_net"   , {"lev", "y", "x"});
 
             nc_sw_flux_up    .insert(sw_flux_up_cpu    .v(), {0, 0, 0});
             nc_sw_flux_dn    .insert(sw_flux_dn_cpu    .v(), {0, 0, 0});
@@ -1170,12 +1145,12 @@ void solve_radiation(int argc, char** argv)
 
         if (switch_sw_raytracing)
         {
-            auto nc_rt_flux_tod_up  = output_nc.add_variable<Float>("rt_flux_tod_up",  {"y","x"});
-            auto nc_rt_flux_sfc_dir = output_nc.add_variable<Float>("rt_flux_sfc_dir", {"y","x"});
-            auto nc_rt_flux_sfc_dif = output_nc.add_variable<Float>("rt_flux_sfc_dif", {"y","x"});
-            auto nc_rt_flux_sfc_up  = output_nc.add_variable<Float>("rt_flux_sfc_up",  {"y","x"});
-            auto nc_rt_flux_abs_dir = output_nc.add_variable<Float>("rt_flux_abs_dir", {"z","y","x"});
-            auto nc_rt_flux_abs_dif = output_nc.add_variable<Float>("rt_flux_abs_dif", {"z","y","x"});
+            auto nc_rt_flux_tod_up  = nc_grp_forward.add_variable<Float>("sw_flux_tod_up",  {"y","x"});
+            auto nc_rt_flux_sfc_dir = nc_grp_forward.add_variable<Float>("sw_flux_sfc_dir", {"y","x"});
+            auto nc_rt_flux_sfc_dif = nc_grp_forward.add_variable<Float>("sw_flux_sfc_dif", {"y","x"});
+            auto nc_rt_flux_sfc_up  = nc_grp_forward.add_variable<Float>("sw_flux_sfc_up",  {"y","x"});
+            auto nc_rt_flux_abs_dir = nc_grp_forward.add_variable<Float>("sw_flux_abs_dir", {"z","y","x"});
+            auto nc_rt_flux_abs_dif = nc_grp_forward.add_variable<Float>("sw_flux_abs_dif", {"z","y","x"});
 
             nc_rt_flux_tod_up .insert(rt_flux_tod_up_cpu .v(), {0,0});
             nc_rt_flux_sfc_dir.insert(rt_flux_sfc_dir_cpu.v(), {0,0});
@@ -1217,15 +1192,6 @@ void solve_radiation(int argc, char** argv)
         // Read the boundary conditions.
         const int n_bnd_sw = rad_sw.get_n_bnd_gpu();
         const int n_gpt_sw = rad_sw.get_n_gpt_gpu();
-
-        Array<Float,1> mu0(input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x}), {n_col});
-        Array<Float,1> azi(input_nc.get_variable<Float>("azi", {n_col_y, n_col_x}), {n_col});
-
-        if (input_sza < 0)
-            mu0.fill(cos(input_sza / Float(180.0) * M_PI));
-
-        if (input_azi < 0)
-            azi.fill(input_azi / Float(180.0) * M_PI);
 
         Array<Float,2> sfc_alb(input_nc.get_variable<Float>("sfc_alb_dir", {n_col_y, n_col_x, n_bnd_sw}), {n_bnd_sw, n_col});
 
@@ -1275,6 +1241,17 @@ void solve_radiation(int argc, char** argv)
             tauc_cam.set_dims({camera.nx, camera.ny});
             dist_cam.set_dims({camera.nx, camera.ny});
             zen_cam.set_dims({camera.nx, camera.ny});
+
+            if (!switch_liquid_cloud_optics)
+            {
+                lwp.set_dims({n_col, n_lay});
+                lwp.fill(Float(0.));
+            }
+            if (!switch_ice_cloud_optics)
+            {
+                iwp.set_dims({n_col, n_lay});
+                iwp.fill(Float(0.));
+            }
         }
 
         const Vector<int> grid_cells = {n_col_x, n_col_y, n_z_in};
@@ -1439,13 +1416,17 @@ void solve_radiation(int argc, char** argv)
         // Store the output.
         Status::print_message("Storing the backward output.");
 
+        nc_grp_backward.add_dimension("px", camera.nx);
+        nc_grp_backward.add_dimension("py", camera.ny);
+
         if (switch_bw_raytracing)
         {
+
             if (switch_broadband)
             {
                 Array<Float,2> radiance_cpu(radiance);
 
-                auto nc_var = output_nc.add_variable<Float>("radiance", {"py","px"});
+                auto nc_var = nc_grp_backward.add_variable<Float>("radiance", {"py","px"});
                 nc_var.insert(radiance_cpu.v(), {0, 0});
                 nc_var.add_attribute("long_name", "shortwave radiance");
                 nc_var.add_attribute("units", "W m-2 sr-1");
@@ -1453,9 +1434,9 @@ void solve_radiation(int argc, char** argv)
             if (switch_image)
             {
                 Array<Float,3> xyz_cpu(XYZ);
-                output_nc.add_dimension("n",3);
+                nc_grp_backward.add_dimension("n",3);
 
-                auto nc_xyz = output_nc.add_variable<Float>("XYZ", {"n","py","px"});
+                auto nc_xyz = nc_grp_backward.add_variable<Float>("XYZ", {"n","py","px"});
                 nc_xyz.insert(xyz_cpu.v(), {0, 0, 0});
 
                 nc_xyz.add_attribute("long_name", "X Y Z tristimulus values");
@@ -1470,30 +1451,22 @@ void solve_radiation(int argc, char** argv)
             Array<Float,2> dist_cam_cpu(dist_cam);
             Array<Float,2> zen_cam_cpu(zen_cam);
 
-            auto nc_var_liwp = output_nc.add_variable<Float>("liq_ice_wp_cam", {"py","px"});
+            auto nc_var_liwp = nc_grp_backward.add_variable<Float>("liq_ice_wp_cam", {"py","px"});
             nc_var_liwp.insert(liwp_cam_cpu.v(), {0, 0});
             nc_var_liwp.add_attribute("long_name", "accumulated liquid+ice water path");
 
-            auto nc_var_tauc = output_nc.add_variable<Float>("tau_cld_cam", {"py","px"});
+            auto nc_var_tauc = nc_grp_backward.add_variable<Float>("tau_cld_cam", {"py","px"});
             nc_var_tauc.insert(tauc_cam_cpu.v(), {0, 0});
             nc_var_tauc.add_attribute("long_name", "accumulated cloud optical depth (441-615nm band)");
 
-            auto nc_var_dist = output_nc.add_variable<Float>("dist_cld_cam", {"py","px"});
+            auto nc_var_dist = nc_grp_backward.add_variable<Float>("dist_cld_cam", {"py","px"});
             nc_var_dist.insert(dist_cam_cpu.v(), {0, 0});
             nc_var_dist.add_attribute("long_name", "distance to first cloudy cell");
 
-            auto nc_var_csza = output_nc.add_variable<Float>("zen_cam", {"py","px"});
+            auto nc_var_csza = nc_grp_backward.add_variable<Float>("zen_cam", {"py","px"});
             nc_var_csza.insert(zen_cam_cpu.v(), {0, 0});
             nc_var_csza.add_attribute("long_name", "zenith angle of camera pixel");
         }
-
-        auto nc_mu0 = output_nc.add_variable<Float>("sza");
-        nc_mu0.insert(acos(mu0({1}))/M_PI * Float(180.), {0});
-
-        auto nc_azi = output_nc.add_variable<Float>("azi");
-        nc_azi.insert(azi({1})/M_PI * Float(180.), {0});
-
-
     }
 
     Status::print_message("###### Finished RTE+RRTMGP solver ######");
