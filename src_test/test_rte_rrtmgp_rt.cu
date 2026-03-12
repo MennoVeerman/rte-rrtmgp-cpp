@@ -919,25 +919,25 @@ void solve_radiation(int argc, char** argv)
         }
 
         // Create output arrays.
-        Array_gpu<Float,2> sw_tot_tau;
-        Array_gpu<Float,2> sw_tot_ssa;
-        Array_gpu<Float,2> sw_cld_tau;
-        Array_gpu<Float,2> sw_cld_ssa;
-        Array_gpu<Float,2> sw_cld_asy;
-        Array_gpu<Float,2> sw_aer_tau;
-        Array_gpu<Float,2> sw_aer_ssa;
-        Array_gpu<Float,2> sw_aer_asy;
+        Array_gpu<Float,2> sw_tau_tot;
+        Array_gpu<Float,2> sw_ssa_tot;
+        Array_gpu<Float,2> sw_tau_cld;
+        Array_gpu<Float,2> sw_ssa_cld;
+        Array_gpu<Float,2> sw_asy_cld;
+        Array_gpu<Float,2> sw_ssa_tau;
+        Array_gpu<Float,2> sw_ssa_aer;
+        Array_gpu<Float,2> sw_asy_aer;
 
         if (sw_single_gpt > 0)
         {
-            sw_tot_tau    .set_dims({n_col, n_lay});
-            sw_tot_ssa    .set_dims({n_col, n_lay});
-            sw_cld_tau    .set_dims({n_col, n_lay});
-            sw_cld_ssa    .set_dims({n_col, n_lay});
-            sw_cld_asy    .set_dims({n_col, n_lay});
-            sw_aer_tau    .set_dims({n_col, n_lay});
-            sw_aer_ssa    .set_dims({n_col, n_lay});
-            sw_aer_asy    .set_dims({n_col, n_lay});
+            sw_tau_tot    .set_dims({n_col, n_lay});
+            sw_ssa_tot    .set_dims({n_col, n_lay});
+            sw_tau_cld    .set_dims({n_col, n_lay});
+            sw_ssa_cld    .set_dims({n_col, n_lay});
+            sw_asy_cld    .set_dims({n_col, n_lay});
+            sw_ssa_tau    .set_dims({n_col, n_lay});
+            sw_ssa_aer    .set_dims({n_col, n_lay});
+            sw_asy_aer    .set_dims({n_col, n_lay});
         }
 
         Array_gpu<Float,2> sw_flux_up;
@@ -970,6 +970,8 @@ void solve_radiation(int argc, char** argv)
             rt_flux_abs_dir.set_dims({n_col_x, n_col_y, n_z});
             rt_flux_abs_dif.set_dims({n_col_x, n_col_y, n_z});
         }
+
+
 
         // Solve the radiation.
         Status::print_message("Solving the shortwave radiation.");
@@ -1029,9 +1031,9 @@ void solve_radiation(int argc, char** argv)
                     rel_gpu, dei_gpu,
                     rh,
                     aerosol_concs_gpu,
-                    sw_tot_tau, sw_tot_ssa,
-                    sw_cld_tau, sw_cld_ssa, sw_cld_asy,
-                    sw_aer_tau, sw_aer_ssa, sw_aer_asy,
+                    sw_tau_tot, sw_ssa_tot,
+                    sw_tau_cld, sw_ssa_cld, sw_asy_cld,
+                    sw_ssa_tau, sw_ssa_aer, sw_asy_aer,
                     sw_flux_up, sw_flux_dn,
                     sw_flux_dn_dir, sw_flux_net,
                     rt_flux_tod_up,
@@ -1057,14 +1059,14 @@ void solve_radiation(int argc, char** argv)
 
         // Store the output.
         Status::print_message("Storing the shortwave output.");
-        Array<Float,2> sw_tot_tau_cpu(sw_tot_tau);
-        Array<Float,2> sw_tot_ssa_cpu(sw_tot_ssa);
-        Array<Float,2> sw_cld_tau_cpu(sw_cld_tau);
-        Array<Float,2> sw_cld_ssa_cpu(sw_cld_ssa);
-        Array<Float,2> sw_cld_asy_cpu(sw_cld_asy);
-        Array<Float,2> sw_aer_tau_cpu(sw_aer_tau);
-        Array<Float,2> sw_aer_ssa_cpu(sw_aer_ssa);
-        Array<Float,2> sw_aer_asy_cpu(sw_aer_asy);
+        Array<Float,2> sw_tau_tot_cpu(sw_tau_tot);
+        Array<Float,2> sw_ssa_tot_cpu(sw_ssa_tot);
+        Array<Float,2> sw_tau_cld_cpu(sw_tau_cld);
+        Array<Float,2> sw_ssa_cld_cpu(sw_ssa_cld);
+        Array<Float,2> sw_asy_cld_cpu(sw_asy_cld);
+        Array<Float,2> sw_ssa_tau_cpu(sw_ssa_tau);
+        Array<Float,2> sw_ssa_aer_cpu(sw_ssa_aer);
+        Array<Float,2> sw_asy_aer_cpu(sw_asy_aer);
 
         Array<Float,2> sw_flux_up_cpu(sw_flux_up);
         Array<Float,2> sw_flux_dn_cpu(sw_flux_dn);
@@ -1080,23 +1082,23 @@ void solve_radiation(int argc, char** argv)
 
         if (sw_single_gpt > 0)
         {
-            auto nc_tot_tau = nc_grp_optics.add_variable<Float>("sw_tot_tau"  , {"lay", "y", "x"});
-            auto nc_tot_ssa = nc_grp_optics.add_variable<Float>("sw_tot_ssa"  , {"lay", "y", "x"});
-            auto nc_cld_tau = nc_grp_optics.add_variable<Float>("sw_cld_tau"  , {"lay", "y", "x"});
-            auto nc_cld_ssa = nc_grp_optics.add_variable<Float>("sw_cld_ssa"  , {"lay", "y", "x"});
-            auto nc_cld_asy = nc_grp_optics.add_variable<Float>("sw_cld_asy"  , {"lay", "y", "x"});
-            auto nc_aer_tau = nc_grp_optics.add_variable<Float>("sw_aer_tau"  , {"lay", "y", "x"});
-            auto nc_aer_ssa = nc_grp_optics.add_variable<Float>("sw_aer_ssa"  , {"lay", "y", "x"});
-            auto nc_aer_asy = nc_grp_optics.add_variable<Float>("sw_aer_asy"  , {"lay", "y", "x"});
+            auto nc_tot_tau = nc_grp_optics.add_variable<Float>("sw_tau_tot"  , {"lay", "y", "x"});
+            auto nc_tot_ssa = nc_grp_optics.add_variable<Float>("sw_ssa_tot"  , {"lay", "y", "x"});
+            auto nc_cld_tau = nc_grp_optics.add_variable<Float>("sw_tau_cld"  , {"lay", "y", "x"});
+            auto nc_cld_ssa = nc_grp_optics.add_variable<Float>("sw_ssa_cld"  , {"lay", "y", "x"});
+            auto nc_cld_asy = nc_grp_optics.add_variable<Float>("sw_asy_cld"  , {"lay", "y", "x"});
+            auto nc_aer_tau = nc_grp_optics.add_variable<Float>("sw_ssa_tau"  , {"lay", "y", "x"});
+            auto nc_aer_ssa = nc_grp_optics.add_variable<Float>("sw_ssa_aer"  , {"lay", "y", "x"});
+            auto nc_aer_asy = nc_grp_optics.add_variable<Float>("sw_asy_aer"  , {"lay", "y", "x"});
 
-            nc_tot_tau.insert(sw_tot_tau_cpu.v(), {0, 0, 0});
-            nc_tot_ssa.insert(sw_tot_ssa_cpu.v(), {0, 0, 0});
-            nc_cld_tau.insert(sw_cld_tau_cpu.v(), {0, 0, 0});
-            nc_cld_ssa.insert(sw_cld_ssa_cpu.v(), {0, 0, 0});
-            nc_cld_asy.insert(sw_cld_asy_cpu.v(), {0, 0, 0});
-            nc_aer_tau.insert(sw_aer_tau_cpu.v(), {0, 0, 0});
-            nc_aer_ssa.insert(sw_aer_ssa_cpu.v(), {0, 0, 0});
-            nc_aer_asy.insert(sw_aer_asy_cpu.v(), {0, 0, 0});
+            nc_tot_tau.insert(sw_tau_tot_cpu.v(), {0, 0, 0});
+            nc_tot_ssa.insert(sw_ssa_tot_cpu.v(), {0, 0, 0});
+            nc_cld_tau.insert(sw_tau_cld_cpu.v(), {0, 0, 0});
+            nc_cld_ssa.insert(sw_ssa_cld_cpu.v(), {0, 0, 0});
+            nc_cld_asy.insert(sw_asy_cld_cpu.v(), {0, 0, 0});
+            nc_aer_tau.insert(sw_ssa_tau_cpu.v(), {0, 0, 0});
+            nc_aer_ssa.insert(sw_ssa_aer_cpu.v(), {0, 0, 0});
+            nc_aer_asy.insert(sw_asy_aer_cpu.v(), {0, 0, 0});
 
             nc_tot_tau.add_attribute("long_name","Total optical depth at g-point "+std::to_string(sw_single_gpt));
             nc_tot_ssa.add_attribute("long_name","Total single scattering albedo at g-point "+std::to_string(sw_single_gpt));
