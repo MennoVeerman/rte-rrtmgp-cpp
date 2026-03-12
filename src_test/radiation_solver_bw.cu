@@ -119,7 +119,7 @@ namespace
         {
             if (land_use_map[i] == 0)
             {
-                albedo[i] = Float(0.25);
+                albedo[i] = Float(0.07);
             }
             else if (land_use_map[i] >= 1 && land_use_map[i] <= 2)
             {
