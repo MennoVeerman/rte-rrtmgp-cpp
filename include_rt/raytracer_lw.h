@@ -47,8 +47,8 @@ class Raytracer_lw
                 Array_gpu<Float,3>& flux_abs);
 
     private:
-//        curandDirectionVectors32_t* qrng_vectors_gpu;
-//        unsigned int* qrng_constants_gpu;
+        curandDirectionVectors32_t* qrng_vectors_gpu;
+        unsigned int* qrng_constants_gpu;
 };
 #endif
 
