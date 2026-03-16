@@ -495,7 +495,7 @@ void solve_radiation(int argc, char** argv)
         n_bnd_lw = std::max(coef_nc_lw.get_dimension_size("bnd"), n_bnd_lw);
         n_gpt_lw = std::max(coef_nc_lw.get_dimension_size("gpt"), n_gpt_lw);
     }
-    if (switch_shortwave)
+    if (switch_shortwave || switch_bw_raytracing)
     {
         Netcdf_file coef_nc_sw("coefficients_sw.nc", Netcdf_mode::Read);
         n_bnd_sw = std::max(coef_nc_sw.get_dimension_size("bnd"), n_bnd_sw);

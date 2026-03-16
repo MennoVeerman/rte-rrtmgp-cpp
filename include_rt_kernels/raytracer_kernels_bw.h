@@ -68,14 +68,11 @@ struct Camera
     {
         if (camera.cam_type != 0)
         {
-            const Vector<Float> dir_tmp = {1, 0, 0};
-            const Vector<Float> dir_up = {0, 0, 1};
+            cam_height = Vector<Float>({camera.mx.z, camera.my.z, camera.mz.z});
+            cam_depth = Vector<Float>({camera.mx.x, camera.my.x, camera.mz.x});
+            cam_width = Float(-1) * normalize(cross(cam_depth, cam_height));
 
-            const Vector<Float> dir_cam = normalize(Vector<Float>({dot(camera.mx,dir_tmp), dot(camera.my,dir_tmp), dot(camera.mz,dir_tmp)}));
-
-            cam_height = normalize(Vector<Float>({dot(camera.mx, dir_up), dot(camera.my,dir_up), dot(camera.mz,dir_up)}));
-            cam_width = Float(-1) * normalize(cross(dir_cam, dir_up));
-            cam_depth = dir_cam / tan(fov/Float(180)*M_PI/Float(2.));
+            cam_depth = cam_depth / tan(fov/Float(180)*M_PI/Float(2.));
 
             if (camera.nx > camera.ny)
                 cam_height = cam_height * Float(camera.ny)/Float(camera.nx);

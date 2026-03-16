@@ -218,9 +218,9 @@ namespace
         else
         {
             // Top-of-atmosphere upwelling radiances
-            photon.direction = {Float(0.), Float(0.), Float(-1)};
-            photon.position.x = (Float(ij_cam % camera.nx) + Float(0.5)) * (grid_size.x / camera.nx);
-            photon.position.y = (Float(ij_cam / camera.nx) + Float(0.5)) * (grid_size.y / camera.ny);
+            photon.direction = {camera.mx.x, camera.my.x, camera.mz.x};
+            photon.position.x = (Float(ij_cam % camera.nx) + rng()) * (grid_size.x / camera.nx);
+            photon.position.y = (Float(ij_cam / camera.nx) + rng()) * (grid_size.y / camera.ny);
             photon.position.z = z_lev_bg[kbg] - s_min;
         }
 
