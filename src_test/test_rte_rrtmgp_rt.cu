@@ -860,7 +860,7 @@ void solve_radiation(int argc, char** argv)
             const std::string gpt = std::to_string(lw_single_gpt);
 
             std::vector<nc_outvar> optics_vars;
-            if (switch_lw_scattering)
+            if (!switch_lw_scattering)
             {
                 optics_vars =
                 {
