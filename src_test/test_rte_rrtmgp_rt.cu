@@ -295,7 +295,7 @@ void solve_radiation(int argc, char** argv)
     if (switch_lw_raytracing)
     {
         lw_photon_power = get_ini_value<Int>(settings, "longwave", "samples", Int(22));
-        lw_photon_count = 1 << lw_photon_power;
+        lw_photon_count = Int(1) << lw_photon_power;
     }
 
     if (switch_longwave && switch_bw_raytracing)
