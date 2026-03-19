@@ -374,7 +374,7 @@ void Raytracer::trace_rays(
 
     const int mie_table_size = mie_cdf.size();
 
-    const int rng_gpt_offset = (igpt-1) * rt_kernel_grid_size * rt_kernel_block_size;
+    const Int rng_gpt_offset = (igpt-1) * rt_kernel_grid_size * rt_kernel_block_size;
 
     if (switch_independent_column)
     {
