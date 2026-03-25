@@ -316,7 +316,8 @@ void Raytracer_lw::trace_rays(
     dim3 block(rt_kernel_block_size);
 
     const Int rng_offset = igpt*rt_lw_kernel_grid*rt_lw_kernel_block;
-    const Int qrng_gpt_offset = igpt * rt_kernel_grid_size * rt_kernel_block_size * photons_per_thread;
+    const Int qrng_gpt_offset = this->qrng_igpt * rt_kernel_grid_size * rt_kernel_block_size * photons_per_thread;
+    ++this->qrng_igpt;
 
     if (switch_independent_column)
     {
