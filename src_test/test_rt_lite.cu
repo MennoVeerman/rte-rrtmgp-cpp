@@ -69,8 +69,8 @@ void solve_radiation(int argc, char** argv)
     const auto settings = toml::parse(case_name + ".ini");
 
     const bool switch_raytracing         = get_ini_value<bool>(settings, "switches", "raytracing", true);
-    const bool switch_bw_raytracing      = get_ini_value<bool>(settings, "switches", "bw-raytracing", true);
-    const bool switch_two_stream         = get_ini_value<bool>(settings, "switches", "two-stream", true);
+    const bool switch_bw_raytracing      = get_ini_value<bool>(settings, "switches", "bw-raytracing", false);
+    const bool switch_two_stream         = get_ini_value<bool>(settings, "switches", "two-stream", false);
     const bool switch_cloud_mie          = get_ini_value<bool>(settings, "switches", "cloud-mie", false);
     const bool switch_independent_column = get_ini_value<bool>(settings, "switches", "independent-column", false);
     const bool switch_profiling          = get_ini_value<bool>(settings, "switches", "profiling", false);
@@ -130,25 +130,25 @@ void solve_radiation(int argc, char** argv)
     const Vector<int> kn_grid = {ngrid_x, ngrid_y, ngrid_z};
 
     // Read the atmospheric fields.
-    const Array<Float,2> tot_tau(input_nc.get_variable<Float>("tot_tau", {n_lay, ny, nx}), {ncol, n_lay});
-    const Array<Float,2> tot_ssa(input_nc.get_variable<Float>("tot_ssa", {n_lay, ny, nx}), {ncol, n_lay});
-    const Array<Float,2> tot_asy(input_nc.get_variable<Float>("tot_asy", {n_lay, ny, nx}), {ncol, n_lay});
+    const Array<Float,2> tot_tau(input_nc.get_variable<Float>("tau_tot", {n_lay, ny, nx}), {ncol, n_lay});
+    const Array<Float,2> tot_ssa(input_nc.get_variable<Float>("ssa_tot", {n_lay, ny, nx}), {ncol, n_lay});
+    const Array<Float,2> tot_asy(input_nc.get_variable<Float>("asy_tot", {n_lay, ny, nx}), {ncol, n_lay});
 
     Array<Float,2> cld_tau({ncol, n_lay});
     Array<Float,2> cld_ssa({ncol, n_lay});
     Array<Float,2> cld_asy({ncol, n_lay});
 
-    cld_tau = std::move(input_nc.get_variable<Float>("cld_tau", {n_lay, ny, nx}));
-    cld_ssa = std::move(input_nc.get_variable<Float>("cld_ssa", {n_lay, ny, nx}));
-    cld_asy = std::move(input_nc.get_variable<Float>("cld_asy", {n_lay, ny, nx}));
+    cld_tau = std::move(input_nc.get_variable<Float>("tau_cld", {n_lay, ny, nx}));
+    cld_ssa = std::move(input_nc.get_variable<Float>("ssa_cld", {n_lay, ny, nx}));
+    cld_asy = std::move(input_nc.get_variable<Float>("asy_cld", {n_lay, ny, nx}));
 
     Array<Float,2> aer_tau({ncol, n_lay});
     Array<Float,2> aer_ssa({ncol, n_lay});
     Array<Float,2> aer_asy({ncol, n_lay});
 
-    aer_tau = std::move(input_nc.get_variable<Float>("aer_tau", {n_lay, ny, nx}));
-    aer_ssa = std::move(input_nc.get_variable<Float>("aer_ssa", {n_lay, ny, nx}));
-    aer_asy = std::move(input_nc.get_variable<Float>("aer_asy", {n_lay, ny, nx}));
+    aer_tau = std::move(input_nc.get_variable<Float>("tau_aer", {n_lay, ny, nx}));
+    aer_ssa = std::move(input_nc.get_variable<Float>("ssa_aer", {n_lay, ny, nx}));
+    aer_asy = std::move(input_nc.get_variable<Float>("asy_aer", {n_lay, ny, nx}));
 
     // read albedo, solar angles, and top-of-domain fluxes
     Array<Float,2> sfc_albedo({ncol, 1});
@@ -156,7 +156,22 @@ void solve_radiation(int argc, char** argv)
 
     const Float zenith_angle = input_nc.get_variable<Float>("sza");
     const Float azimuth_angle = input_nc.get_variable<Float>("azi");
-    const Float tod_dir = input_nc.get_variable<Float>("tod_direct");
+
+    const Float sw_inc_flux = input_nc.get_variable<Float>("sw_inc_flux");
+    Float sw_inc_dif_frac;
+    if (input_nc.variable_exists("sw_inc_dif_frac"))
+    {
+        sw_inc_dif_frac = input_nc.get_variable<Float>("sw_inc_dif_frac");
+        if (sw_inc_dif_frac > Float(0.))
+        {
+            if (n_lay != n_z_in)
+                throw std::runtime_error("top-of-domain diffuse fraction requires n_lay == n_z (no background profile");
+
+            if (bw-raytracing)
+                throw std::runtime_error("top-of-domain diffuse fraction must be 0 for backward raytracing");
+        }
+    }
+
 
     Array<Float,1> mu0({ncol});
     mu0.fill(cos(zenith_angle));
@@ -287,8 +302,8 @@ void solve_radiation(int argc, char** argv)
         flux_dn_dir_2stream.set_dims({ncol, n_lay+1});
 
         Rte_sw_rt rte_sw;
-        Rte_solver_kernels_cuda_rt::apply_BC(ncol, n_lay, 0, tod_dir * cos(zenith_angle), flux_dn_dir_2stream.ptr());
-        Rte_solver_kernels_cuda_rt::apply_BC(ncol, n_lay, 0, flux_dn_2stream.ptr());
+        Rte_solver_kernels_cuda_rt::apply_BC(ncol, n_lay, 0, sw_inc_flux * cos(zenith_angle) * (Float(1.) - sw_inc_dif_frac), flux_dn_dir_2stream.ptr());
+        Rte_solver_kernels_cuda_rt::apply_BC(ncol, n_lay, 0, sw_inc_flux * cos(zenith_angle) * sw_inc_dif_frac, flux_dn_2stream.ptr());
 
         Rte_solver_kernels_cuda_rt::sw_solver_2stream(
             ncol, n_lay, 0,
@@ -352,8 +367,8 @@ void solve_radiation(int argc, char** argv)
                    sfc_albedo_g,
                    zenith_angle,
                    azimuth_angle,
-                   tod_dir * std::cos(zenith_angle),
-                   Float(0.),
+                   sw_inc_flux * std::cos(zenith_angle) * (Float(1.) - sw_inc_dif_frac),
+                   sw_inc_flux * std::cos(zenith_angle) * sw_inc_dif_frac,
                    flux_tod_dn,
                    flux_tod_up,
                    flux_sfc_dir,
@@ -452,7 +467,7 @@ void solve_radiation(int argc, char** argv)
                     land_use_map,
                     zenith_angle,
                     azimuth_angle,
-                    tod_dir,
+                    sw_inc_flux,
                     camera,
                     radiance);
 
