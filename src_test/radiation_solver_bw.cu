@@ -1065,6 +1065,7 @@ void Radiation_solver_bw_shortwave::solve_gpu(
                         zenith_angle,
                         azimuth_angle,
                         toa_src({1}),
+                        Float(0.),
                         toa_factor,
                         rayleigh,
                         col_dry,
@@ -1341,6 +1342,7 @@ void Radiation_solver_bw_shortwave::solve_gpu_bb(
                     zenith_angle,
                     azimuth_angle,
                     toa_src({1}),
+                    Float(0.),
                     camera,
                     flux_camera);
 

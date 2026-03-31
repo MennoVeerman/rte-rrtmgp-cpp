@@ -478,10 +478,10 @@ void solve_radiation(int argc, char** argv)
     azi = input_nc.get_variable<Float>("azi", {n_col_y, n_col_x});
 
     // overwrite mu0 and azi if solar angles are provided in ini
-    if (input_sza > 0)
+    if (input_sza >= 0)
         mu0.fill(cos(input_sza / Float(180.0) * M_PI));
 
-    if (input_azi > 0)
+    if (input_azi >= 0)
         azi.fill(input_azi / Float(180.0) * M_PI);
 
     // read spectral information

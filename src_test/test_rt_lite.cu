@@ -167,7 +167,7 @@ void solve_radiation(int argc, char** argv)
             if (n_lay != n_z_in)
                 throw std::runtime_error("top-of-domain diffuse fraction requires n_lay == n_z (no background profile");
 
-            if (bw-raytracing)
+            if (switch_bw_raytracing)
                 throw std::runtime_error("top-of-domain diffuse fraction must be 0 for backward raytracing");
         }
     }
@@ -468,6 +468,7 @@ void solve_radiation(int argc, char** argv)
                     zenith_angle,
                     azimuth_angle,
                     sw_inc_flux,
+                    Float(0.),
                     camera,
                     radiance);
 
