@@ -154,10 +154,23 @@ void solve_radiation(int argc, char** argv)
     Array<Float,2> sfc_albedo({ncol, 1});
     sfc_albedo = std::move(input_nc.get_variable<Float>("albedo", {ny, nx}));
 
-    const Float zenith_angle = input_nc.get_variable<Float>("sza");
-    const Float azimuth_angle = input_nc.get_variable<Float>("azi");
+    // Although mu0 and azi should be provided as 2D arrays, ray tracer does not support variables solar angles yet. Currently, only first values of mu0 and azi are used.
+    Array<Float,1> mu0(input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x}), {n_col})
+    Array<Float,1> azi(input_nc.get_variable<Float>("azi", {n_col_y, n_col_x}), {n_col})
 
-    const Float sw_inc_flux = input_nc.get_variable<Float>("sw_inc_flux");
+    // overwrite mu0 and azi if solar angles are provided in ini
+    if (input_sza >= 0)
+        mu0.fill(cos(input_sza / Float(180.0) * M_PI));
+
+    if (input_azi >= 0)
+        azi.fill(input_azi / Float(180.0) * M_PI);
+
+    // Also here, 2D arrays are expected but not yet used
+    Array<Float,1> sw_inc_flux_direct(input_nc.get_variable<Float>("sw_inc_flux_direct", {n_col_y, n_col_x}), {n_col})
+    Array<Float,1> sw_inc_flux_diffuse(input_nc.get_variable<Float>("sw_inc_flux_diffuse", {n_col_y, n_col_x}), {n_col})
+
+    const Float sw_inc_flux_direct = input_nc.get_variable<Float>("sw_inc_flux");
+    const Float sw_inc_flux_diffuse = input_nc.get_variable<Float>("sw_inc_flux_diffuse");
     Float sw_inc_dif_frac;
     if (input_nc.variable_exists("sw_inc_dif_frac"))
     {
@@ -171,10 +184,6 @@ void solve_radiation(int argc, char** argv)
                 throw std::runtime_error("top-of-domain diffuse fraction must be 0 for backward raytracing");
         }
     }
-
-
-    Array<Float,1> mu0({ncol});
-    mu0.fill(cos(zenith_angle));
 
     Camera camera;
     if (switch_bw_raytracing)
@@ -365,8 +374,8 @@ void solve_radiation(int argc, char** argv)
                    aer_asy_g,
                    rel,
                    sfc_albedo_g,
-                   zenith_angle,
-                   azimuth_angle,
+                   acos({1}),
+                   azi({1}),
                    sw_inc_flux * std::cos(zenith_angle) * (Float(1.) - sw_inc_dif_frac),
                    sw_inc_flux * std::cos(zenith_angle) * sw_inc_dif_frac,
                    flux_tod_dn,
@@ -465,8 +474,8 @@ void solve_radiation(int argc, char** argv)
                     aer_asy_g,
                     sfc_albedo_g,
                     land_use_map,
-                    zenith_angle,
-                    azimuth_angle,
+                    acos(mu0({1}),
+                    azi({1}),
                     sw_inc_flux,
                     Float(0.),
                     camera,

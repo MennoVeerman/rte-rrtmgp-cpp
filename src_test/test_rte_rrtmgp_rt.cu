@@ -471,6 +471,7 @@ void solve_radiation(int argc, char** argv)
         read_and_set_aer("aermr11", n_col_x, n_col_y, n_lay, input_nc, aerosol_concs);
     }
 
+    // Although mu0 and azi should be provided as arrays, ray tracer does not support variables solar angles yet. Currently, only first values of mu0 and azi are used.
     Array<Float,1> mu0({n_col});
     Array<Float,1> azi({n_col});
 
