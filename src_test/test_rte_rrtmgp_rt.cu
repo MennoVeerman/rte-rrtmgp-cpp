@@ -504,18 +504,15 @@ void solve_radiation(int argc, char** argv)
     }
 
     // read boundary conditions
-    Array<Float,2> sfc_alb_dir;
-    Array<Float,2> sfc_alb_dif;
+    Array<Float,2> alb_sfc;
     Array<Float,2> emis_sfc;
     Array<Float,1> t_sfc;
 
     if (switch_shortwave || switch_bw_raytracing)
     {
-        sfc_alb_dir.set_dims({n_bnd_sw, n_col});
-        sfc_alb_dif.set_dims({n_bnd_sw, n_col});
+        alb_sfc.set_dims({n_bnd_sw, n_col});
 
-        sfc_alb_dir = input_nc.get_variable<Float>("sfc_alb_dir", {n_col_y, n_col_x, n_bnd_sw});
-        sfc_alb_dif = input_nc.get_variable<Float>("sfc_alb_dif", {n_col_y, n_col_x, n_bnd_sw});
+        alb_sfc = input_nc.get_variable<Float>("alb_sfc", {n_col_y, n_col_x, n_bnd_sw});
     }
 
     if (switch_longwave)
@@ -689,8 +686,7 @@ void solve_radiation(int argc, char** argv)
     Array_gpu<Float,2> dei_gpu(dei);
     Array_gpu<Float,2> rh_gpu(rh);
 
-    Array_gpu<Float,2> sfc_alb_dir_gpu(sfc_alb_dir);
-    Array_gpu<Float,2> sfc_alb_dif_gpu(sfc_alb_dif);
+    Array_gpu<Float,2> alb_sfc_gpu(alb_sfc);
     Array_gpu<Float,1> mu0_gpu(mu0);
     Array_gpu<Float,1> azi_gpu(azi);
 
@@ -1072,7 +1068,7 @@ void solve_radiation(int argc, char** argv)
                     p_lay_gpu, p_lev_gpu,
                     t_lay_gpu, t_lev_gpu,
                     col_dry_gpu,
-                    sfc_alb_dir_gpu, sfc_alb_dif_gpu,
+                    alb_sfc_gpu,
                     tsi_scaling_gpu, mu0_gpu, azi_gpu,
                     lwp_gpu, iwp_gpu,
                     rel_gpu, dei_gpu,
@@ -1300,7 +1296,7 @@ void solve_radiation(int argc, char** argv)
                     t_lay_gpu, t_lev_gpu,
                     z_lev_gpu,
                     col_dry_gpu,
-                    sfc_alb_dir_gpu,
+                    alb_sfc_gpu,
                     tsi_scaling_gpu,
                     mu0_gpu, azi_gpu,
                     lwp_gpu, iwp_gpu,
@@ -1354,7 +1350,7 @@ void solve_radiation(int argc, char** argv)
                     t_lay_gpu, t_lev_gpu,
                     z_lev_gpu,
                     col_dry_gpu,
-                    sfc_alb_dir_gpu,
+                    alb_sfc_gpu,
                     tsi_scaling_gpu,
                     mu0_gpu, azi_gpu,
                     lwp_gpu, iwp_gpu,
