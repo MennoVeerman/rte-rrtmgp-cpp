@@ -520,6 +520,8 @@ void Radiation_solver_longwave::solve_gpu(
 
     const Float grid_d_xy_min = min(grid_d.x, grid_d.y);
 
+    const Bool bg_profile_present = grid_cells.z < n_lay;
+
     optical_props = std::make_unique<Optical_props_2str_rt>(n_col, n_lay, *kdist_gpu);
     cloud_optical_props = std::make_unique<Optical_props_2str_rt>(n_col, n_lay, *cloud_optics_gpu);
     aerosol_optical_props = std::make_unique<Optical_props_2str_rt>(n_col, n_lay, *aerosol_optics_gpu);
@@ -715,7 +717,7 @@ void Radiation_solver_longwave::solve_gpu(
         std::unique_ptr<Fluxes_broadband_rt> fluxes =
                 std::make_unique<Fluxes_broadband_rt>(grid_cells.x, grid_cells.y, grid_cells.z, n_lev);
 
-        if (switch_plane_parallel || !use_raytracer)
+        if (switch_plane_parallel || !use_raytracer || bg_profile_present)
         {
             rte_lw.rte_lw(
                     optical_props,
@@ -750,6 +752,8 @@ void Radiation_solver_longwave::solve_gpu(
             {
                 ++monte_carlo_gpoints;
 
+                const Float lw_flux_tod = bg_profile_present ? (*fluxes).get_flux_dn()({1, grid_cells.z}) : Float(0.);
+
                 raytracer_lw.trace_rays(
                         igpt,
                         switch_independent_column,
@@ -768,7 +772,7 @@ void Radiation_solver_longwave::solve_gpu(
                         (*sources).get_lay_source(),
                         (*sources).get_sfc_source(),
                         emis_sfc,
-                        (*fluxes).get_flux_dn()({1, grid_cells.z}),
+                        lw_flux_tod,
                         (*fluxes).get_flux_tod_dn(),
                         (*fluxes).get_flux_tod_up(),
                         (*fluxes).get_flux_sfc_dif(),
