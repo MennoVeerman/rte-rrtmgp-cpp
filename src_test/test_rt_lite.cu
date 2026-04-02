@@ -26,9 +26,8 @@
 #include "netcdf_interface.h"
 #include "array.h"
 #include "raytracer_sw.h"
-#include "raytracer_kernels_sw.h"
+#include "raytracer_lw.h"
 #include "raytracer_bw.h"
-#include "raytracer_kernels_bw.h"
 #include "types.h"
 #include "rte_solver_kernels_cuda_rt.h"
 #include "rte_sw_rt.h"
@@ -97,7 +96,7 @@ void solve_radiation(int argc, char** argv)
     const bool switch_lw_independent_column = get_ini_value<bool>(settings, "longwave", "rt_independent_column", false);
 
     // minimum ratio between the lowest gaseous mean free path and the horizontal grid spacing at which ray tracer is still used. Set to 0. to use ray tracer for all g-points
-    const const Float min_mfp_grid_ratio    = get_ini_value<Float>(settings, "longwave", "min_mfp_grid_ratio", Float(1.0));
+    const Float min_mfp_grid_ratio    = get_ini_value<Float>(settings, "longwave", "min_mfp_grid_ratio", Float(1.0));
 
     //// Backward (shortwave only) ////
     const bool switch_bw_raytracing         = get_ini_value<bool>(settings, "backward", "bw_raytracing", true);
@@ -180,9 +179,10 @@ void solve_radiation(int argc, char** argv)
     const int nx = input_nc.get_dimension_size("x");
     const int ny = input_nc.get_dimension_size("y");
     const int n_z_in = input_nc.get_dimension_size("z");
-    const int n_lay = input_nc.get_dimension_size("lay");
+    const int nlay = input_nc.get_dimension_size("lay");
+    const int nlev = input_nc.get_dimension_size("lev");
 
-    const int nz = (n_z_in < n_lay) ? n_z_in+1 : n_z_in;
+    const int nz = (n_z_in < nlay) ? n_z_in+1 : n_z_in;
 
     const int ncol = nx*ny;
 
@@ -190,7 +190,8 @@ void solve_radiation(int argc, char** argv)
     const Array<Float,1> grid_x(input_nc.get_variable<Float>("x", {nx}), {nx});
     const Array<Float,1> grid_y(input_nc.get_variable<Float>("y", {ny}), {ny});
     const Array<Float,1> grid_z(input_nc.get_variable<Float>("z", {n_z_in}), {n_z_in});
-    Array<Float,1> z_lev;
+
+    const Array<Float,1> z_lev(input_nc.get_variable<Float>("z_lev", {nlev}), {nlev});
 
     const Float dx = grid_x({2}) - grid_x({1});
     const Float dy = grid_y({2}) - grid_y({1});
@@ -207,58 +208,72 @@ void solve_radiation(int argc, char** argv)
     Array<Float,2> sw_tau_cld, sw_ssa_cld, sw_asy_cld;
     Array<Float,2> sw_tau_aer, sw_ssa_aer, sw_asy_aer;
 
-    if (switch_sw_raytracing || switch_bw_raytracing)
+    if (switch_shortwave)
     {
-        sw_tau_tot.set_dims({ncol, n_lay});
-        sw_ssa_tot.set_dims({ncol, n_lay});
-        sw_asy_tot.set_dims({ncol, n_lay});
-        sw_tau_cld.set_dims({ncol, n_lay});
-        sw_ssa_cld.set_dims({ncol, n_lay});
-        sw_asy_cld.set_dims({ncol, n_lay});
-        sw_tau_aer.set_dims({ncol, n_lay});
-        sw_ssa_aer.set_dims({ncol, n_lay});
-        sw_asy_aer.set_dims({ncol, n_lay});
+        sw_tau_tot.set_dims({ncol, nlay});
+        sw_ssa_tot.set_dims({ncol, nlay});
+        sw_asy_tot.set_dims({ncol, nlay});
+        sw_tau_cld.set_dims({ncol, nlay});
+        sw_ssa_cld.set_dims({ncol, nlay});
+        sw_asy_cld.set_dims({ncol, nlay});
+        sw_tau_aer.set_dims({ncol, nlay});
+        sw_ssa_aer.set_dims({ncol, nlay});
+        sw_asy_aer.set_dims({ncol, nlay});
 
-        sw_tau_tot = std::move(input_nc.get_variable<Float>("sw_tau_tot", {n_lay, ny, nx}));
-        sw_ssa_tot = std::move(input_nc.get_variable<Float>("sw_ssa_tot", {n_lay, ny, nx}));
-        sw_asy_tot = std::move(input_nc.get_variable<Float>("sw_asy_tot", {n_lay, ny, nx}));
+        sw_tau_tot = std::move(input_nc.get_variable<Float>("sw_tau_tot", {nlay, ny, nx}));
+        sw_ssa_tot = std::move(input_nc.get_variable<Float>("sw_ssa_tot", {nlay, ny, nx}));
+        sw_asy_tot = std::move(input_nc.get_variable<Float>("sw_asy_tot", {nlay, ny, nx}));
 
-        sw_tau_cld = std::move(input_nc.get_variable<Float>("sw_tau_cld", {n_lay, ny, nx}));
-        sw_ssa_cld = std::move(input_nc.get_variable<Float>("sw_ssa_cld", {n_lay, ny, nx}));
-        sw_asy_cld = std::move(input_nc.get_variable<Float>("sw_asy_cld", {n_lay, ny, nx}));
+        sw_tau_cld = std::move(input_nc.get_variable<Float>("sw_tau_cld", {nlay, ny, nx}));
+        sw_ssa_cld = std::move(input_nc.get_variable<Float>("sw_ssa_cld", {nlay, ny, nx}));
+        sw_asy_cld = std::move(input_nc.get_variable<Float>("sw_asy_cld", {nlay, ny, nx}));
 
-        sw_tau_aer = std::move(input_nc.get_variable<Float>("sw_tau_aer", {n_lay, ny, nx}));
-        sw_ssa_aer = std::move(input_nc.get_variable<Float>("sw_ssa_aer", {n_lay, ny, nx}));
-        sw_asy_aer = std::move(input_nc.get_variable<Float>("sw_asy_aer", {n_lay, ny, nx}));
+        sw_tau_aer = std::move(input_nc.get_variable<Float>("sw_tau_aer", {nlay, ny, nx}));
+        sw_ssa_aer = std::move(input_nc.get_variable<Float>("sw_ssa_aer", {nlay, ny, nx}));
+        sw_asy_aer = std::move(input_nc.get_variable<Float>("sw_asy_aer", {nlay, ny, nx}));
     }
 
     Array<Float,2> lw_tau_tot, lw_ssa_tot, lw_asy_tot;
     Array<Float,2> lw_tau_cld, lw_ssa_cld, lw_asy_cld;
     Array<Float,2> lw_tau_aer, lw_ssa_aer, lw_asy_aer;
+    Array<Float,2> source_lay, source_lev;
+    Array<Float,1> source_sfc;
 
-    if (switch_lw_raytracing || switch_bw_raytracing)
+    if (switch_longwave)
     {
-        lw_tau_tot.set_dims({ncol, n_lay});
-        lw_ssa_tot.set_dims({ncol, n_lay});
-        lw_asy_tot.set_dims({ncol, n_lay});
-        lw_tau_cld.set_dims({ncol, n_lay});
-        lw_ssa_cld.set_dims({ncol, n_lay});
-        lw_asy_cld.set_dims({ncol, n_lay});
-        lw_tau_aer.set_dims({ncol, n_lay});
-        lw_ssa_aer.set_dims({ncol, n_lay});
-        lw_asy_aer.set_dims({ncol, n_lay});
+        lw_tau_tot.set_dims({ncol, nlay});
+        lw_ssa_tot.set_dims({ncol, nlay});
+        lw_asy_tot.set_dims({ncol, nlay});
+        lw_tau_cld.set_dims({ncol, nlay});
+        lw_ssa_cld.set_dims({ncol, nlay});
+        lw_asy_cld.set_dims({ncol, nlay});
+        lw_tau_aer.set_dims({ncol, nlay});
+        lw_ssa_aer.set_dims({ncol, nlay});
+        lw_asy_aer.set_dims({ncol, nlay});
 
-        lw_tau_tot = std::move(input_nc.get_variable<Float>("lw_tau_tot", {n_lay, ny, nx}));
-        lw_ssa_tot = std::move(input_nc.get_variable<Float>("lw_ssa_tot", {n_lay, ny, nx}));
-        lw_asy_tot = std::move(input_nc.get_variable<Float>("lw_asy_tot", {n_lay, ny, nx}));
+        lw_tau_tot = std::move(input_nc.get_variable<Float>("lw_tau_tot", {nlay, ny, nx}));
+        lw_ssa_tot = std::move(input_nc.get_variable<Float>("lw_ssa_tot", {nlay, ny, nx}));
+        lw_asy_tot = std::move(input_nc.get_variable<Float>("lw_asy_tot", {nlay, ny, nx}));
 
-        lw_tau_cld = std::move(input_nc.get_variable<Float>("lw_tau_cld", {n_lay, ny, nx}));
-        lw_ssa_cld = std::move(input_nc.get_variable<Float>("lw_ssa_cld", {n_lay, ny, nx}));
-        lw_asy_cld = std::move(input_nc.get_variable<Float>("lw_asy_cld", {n_lay, ny, nx}));
+        lw_tau_cld = std::move(input_nc.get_variable<Float>("lw_tau_cld", {nlay, ny, nx}));
+        lw_ssa_cld = std::move(input_nc.get_variable<Float>("lw_ssa_cld", {nlay, ny, nx}));
+        lw_asy_cld = std::move(input_nc.get_variable<Float>("lw_asy_cld", {nlay, ny, nx}));
 
-        lw_tau_aer = std::move(input_nc.get_variable<Float>("lw_tau_aer", {n_lay, ny, nx}));
-        lw_ssa_aer = std::move(input_nc.get_variable<Float>("lw_ssa_aer", {n_lay, ny, nx}));
-        lw_asy_aer = std::move(input_nc.get_variable<Float>("lw_asy_aer", {n_lay, ny, nx}));
+        lw_tau_aer = std::move(input_nc.get_variable<Float>("lw_tau_aer", {nlay, ny, nx}));
+        lw_ssa_aer = std::move(input_nc.get_variable<Float>("lw_ssa_aer", {nlay, ny, nx}));
+        lw_asy_aer = std::move(input_nc.get_variable<Float>("lw_asy_aer", {nlay, ny, nx}));
+
+        source_lay.set_dims({ncol, nlay});
+        source_sfc.set_dims({ncol});
+
+        source_lay = std::move(input_nc.get_variable<Float>("source_lay", {nlay, ny, nx}));
+        source_sfc = std::move(input_nc.get_variable<Float>("source_sfc", {ny, nx}));
+
+        if (switch_lw_plane_parallel)
+        {
+            source_lev.set_dims({ncol, nlev});
+            source_lev = std::move(input_nc.get_variable<Float>("source_lev", {nlev, ny, nx}));
+        }
     }
 
     // read albedo, solar angles, and top-of-domain fluxes
@@ -314,7 +329,7 @@ void solve_radiation(int argc, char** argv)
     Array<Float,4> mie_angs_bw_c;
     Array<Float,4> mie_phase_bw_c;
     Array<Float,1> mie_phase_angs_bw_c;
-    Array<Float,2> rel_c({ncol, n_lay});
+    Array<Float,2> rel_c({ncol, nlay});
 
     if (switch_cloud_mie)
     {
@@ -335,7 +350,7 @@ void solve_radiation(int argc, char** argv)
         mie_phase_bw_c = std::move(input_nc.get_variable<Float>("phase", {1, 1, n_re, n_mie}));
         mie_phase_angs_bw_c = std::move(input_nc.get_variable<Float>("phase_angle", {n_mie}));
 
-        rel_c = std::move(input_nc.get_variable<Float>("rel", {n_lay, ny, nx}));
+        rel_c = std::move(input_nc.get_variable<Float>("rel", {nlay, ny, nx}));
     }
     else
     {
@@ -354,7 +369,7 @@ void solve_radiation(int argc, char** argv)
     lum_c.fill(Float(1.));
     Array_gpu<Float,1> land_use_map(lum_c);
 
-    //// GPU arrays
+    ///// GPU arrays
     Array_gpu<Float,2> sw_tau_tot_g(sw_tau_tot);
     Array_gpu<Float,2> sw_ssa_tot_g(sw_ssa_tot);
     Array_gpu<Float,2> sw_asy_tot_g(sw_asy_tot);
@@ -374,6 +389,9 @@ void solve_radiation(int argc, char** argv)
     Array_gpu<Float,2> lw_tau_aer_g(lw_tau_aer);
     Array_gpu<Float,2> lw_ssa_aer_g(lw_ssa_aer);
     Array_gpu<Float,2> lw_asy_aer_g(lw_asy_aer);
+    Array_gpu<Float,2> source_lay_g(source_lay);
+    Array_gpu<Float,2> source_lev_g(source_lev);
+    Array_gpu<Float,1> source_sfc_g(source_sfc);
 
     Array_gpu<Float,2> mu0_g(mu0);
     Array_gpu<Float,2> alb_sfc_g(alb_sfc);
@@ -388,13 +406,12 @@ void solve_radiation(int argc, char** argv)
     output_nc.add_dimension("x", nx);
     output_nc.add_dimension("y", ny);
     output_nc.add_dimension("z", n_z_in);
-    output_nc.add_dimension("lay", n_lay);
-    output_nc.add_dimension("lev", n_lay+1);
+    output_nc.add_dimension("lay", nlay);
+    output_nc.add_dimension("lev", nlev);
 
     Netcdf_group nc_grp_forward;
     Netcdf_group nc_grp_backward;
     Netcdf_group nc_grp_planeparallel;
-    Netcdf_group nc_grp_optics;
 
     if ((switch_shortwave && switch_sw_raytracing) || (switch_longwave && switch_lw_raytracing))
         nc_grp_forward = output_nc.add_group("rt_forward");
@@ -418,7 +435,158 @@ void solve_radiation(int argc, char** argv)
         output_nc.add_dimension("py", camera.ny);
     }
 
-    // shortwave solvers
+    ////// longwave solvers
+    if (switch_longwave)
+    {
+        // are scattering properties provided (nonzero)?
+        const Bool do_lw_scattering = lw_ssa_tot.max() > Float(0.);
+
+        const Bool bg_profile_present = n_z_in < nlay;
+
+        // output arrays
+        Array_gpu<Float,2> lw_rt_flux_tod_dn;
+        Array_gpu<Float,2> lw_rt_flux_tod_up;
+        Array_gpu<Float,2> lw_rt_flux_sfc_dn;
+        Array_gpu<Float,2> lw_rt_flux_sfc_up;
+        Array_gpu<Float,3> lw_rt_flux_abs;
+
+        Array_gpu<Float,2> lw_pp_flux_dn;
+        Array_gpu<Float,2> lw_pp_flux_up;
+        Array_gpu<Float,2> lw_pp_flux_dn_dir;
+
+        if (switch_lw_plane_parallel || bg_profile_present)
+        {
+            lw_pp_flux_up.set_dims({ncol, nlev});
+            lw_pp_flux_dn.set_dims({ncol, nlev});
+            lw_pp_flux_dn_dir.set_dims({ncol, nlev});
+
+            Rte_solver_kernels_cuda_rt::apply_BC(ncol, nlay, 0, lw_inc_flux({1}), lw_pp_flux_dn.ptr());
+
+            if (do_lw_scattering)
+            {
+                Rte_solver_kernels_cuda_rt::lw_solver_2stream(
+                        ncol, nlay, 0,
+                        lw_tau_tot_g.ptr(),
+                        lw_ssa_tot_g.ptr(),
+                        lw_asy_tot_g.ptr(),
+                        source_lay_g.ptr(),
+                        source_lev_g.ptr(),
+                        emis_sfc_g.ptr(), source_sfc_g.ptr(),
+                        lw_pp_flux_up.ptr(), lw_pp_flux_dn.ptr());
+            }
+            else
+            {
+                Array_gpu<Float,1> sfc_src_jac(source_sfc.get_dims());
+                Array_gpu<Float,2> flux_up_jac(lw_pp_flux_up.get_dims());
+
+                Array_gpu<Float,2> gauss_Ds(Array<Float,2>({1./0.6096748751}, {1,1}));
+                Array_gpu<Float,2> gauss_wts(Array<Float,2>({1.}, {1,1}));
+
+                Rte_solver_kernels_cuda_rt::lw_solver_noscat_gaussquad(
+                        ncol, nlay, 0, 1,
+                        gauss_Ds.ptr(), gauss_wts.ptr(),
+                        lw_tau_tot_g.ptr(),
+                        source_lay_g.ptr(),
+                        source_lev_g.ptr(),
+                        emis_sfc_g.ptr(), source_sfc_g.ptr(),
+                        lw_pp_flux_up.ptr(), lw_pp_flux_dn.ptr(),
+                        sfc_src_jac.ptr(), flux_up_jac.ptr());
+            }
+
+            Array<Float,2> lw_pp_flux_up_c(lw_pp_flux_up);
+            Array<Float,2> lw_pp_flux_dn_c(lw_pp_flux_dn);
+
+            auto nc_lw_up = nc_grp_planeparallel.add_variable<Float>("lw_flux_up" , {"lev", "y", "x"});
+            auto nc_lw_dn = nc_grp_planeparallel.add_variable<Float>("lw_flux_dn" , {"lev", "y", "x"});
+
+            nc_lw_up.insert(lw_pp_flux_up_c  .v(), {0, 0, 0});
+            nc_lw_dn.insert(lw_pp_flux_dn_c  .v(), {0, 0, 0});
+        }
+
+        if (switch_lw_raytracing)
+        {
+            lw_rt_flux_tod_dn.set_dims({nx, ny});
+            lw_rt_flux_tod_up.set_dims({nx, ny});
+            lw_rt_flux_sfc_dn.set_dims({nx, ny});
+            lw_rt_flux_sfc_up.set_dims({nx, ny});
+            lw_rt_flux_abs.set_dims({nx, ny, n_z_in});
+
+            Raytracer_lw raytracer_lw;
+            const Vector<int> grid_cells = {nx, ny, n_z_in};
+
+            const Float lw_flux_tod = bg_profile_present ? lw_pp_flux_dn({1, grid_cells.z+1}) : Float(0.);
+
+            Status::print_message("Starting the longwave raytracer!!");
+
+            cudaDeviceSynchronize();
+            cudaEvent_t start;
+            cudaEvent_t stop;
+            cudaEventCreate(&start);
+            cudaEventCreate(&stop);
+
+            cudaEventRecord(start, 0);
+            // do something.
+
+	        raytracer_lw.trace_rays(
+                   0,
+                   switch_lw_independent_column,
+                   lw_photon_count,
+                   grid_cells,
+                   grid_d,
+                   kn_grid,
+                   lw_tau_tot_g,
+                   lw_ssa_tot_g,
+                   lw_tau_cld_g,
+                   lw_ssa_cld_g,
+                   lw_asy_cld_g,
+                   lw_tau_aer_g,
+                   lw_ssa_aer_g,
+                   lw_asy_aer_g,
+                   source_lay_g,
+                   source_sfc_g,
+                   emis_sfc_g,
+                   lw_flux_tod,
+                   lw_rt_flux_tod_dn,
+                   lw_rt_flux_tod_up,
+                   lw_rt_flux_sfc_dn,
+                   lw_rt_flux_sfc_up,
+                   lw_rt_flux_abs);
+
+            cudaEventRecord(stop, 0);
+            cudaEventSynchronize(stop);
+            float duration = 0.f;
+            cudaEventElapsedTime(&duration, start, stop);
+
+            cudaEventDestroy(start);
+            cudaEventDestroy(stop);
+
+            Status::print_message("Duration longwave raytracer: " + std::to_string(duration) + " (ms)");
+
+            // output arrays to cpu
+            Array<Float,2> flux_tod_dn_c(lw_rt_flux_tod_dn);
+            Array<Float,2> flux_tod_up_c(lw_rt_flux_tod_up);
+            Array<Float,2> flux_sfc_dn_c(lw_rt_flux_sfc_dn);
+            Array<Float,2> flux_sfc_up_c(lw_rt_flux_sfc_up);
+            Array<Float,3> flux_abs_c(lw_rt_flux_abs);
+
+            // Store the output.
+            Status::print_message("Storing the longwave raytracer output.");
+
+            auto nc_flux_tod_dn     = nc_grp_forward.add_variable<Float>("lw_flux_tod_dn" , {"y", "x"});
+            auto nc_flux_tod_up     = nc_grp_forward.add_variable<Float>("lw_flux_tod_up" , {"y", "x"});
+            auto nc_flux_sfc_dn     = nc_grp_forward.add_variable<Float>("lw_flux_sfc_dn" , {"y", "x"});
+            auto nc_flux_sfc_up     = nc_grp_forward.add_variable<Float>("lw_flux_sfc_up" , {"y", "x"});
+            auto nc_flux_abs        = nc_grp_forward.add_variable<Float>("lw_abs"         , {"z", "y", "x"});
+
+            nc_flux_tod_dn   .insert(flux_tod_dn_c  .v(), {0, 0});
+            nc_flux_tod_up   .insert(flux_tod_up_c  .v(), {0, 0});
+            nc_flux_sfc_dn   .insert(flux_sfc_dn_c  .v(), {0, 0});
+            nc_flux_sfc_up   .insert(flux_sfc_up_c  .v(), {0, 0});
+            nc_flux_abs      .insert(flux_abs_c     .v(), {0, 0, 0});
+        }
+    }
+
+    ////// shortwave solvers
     if (switch_shortwave)
     {
         // output arrays
@@ -435,16 +603,15 @@ void solve_radiation(int argc, char** argv)
         Array_gpu<Float,2> sw_pp_flux_dn_dir;
         if (switch_sw_plane_parallel)
         {
-            sw_pp_flux_up.set_dims({ncol, n_lay+1});
-            sw_pp_flux_dn.set_dims({ncol, n_lay+1});
-            sw_pp_flux_dn_dir.set_dims({ncol, n_lay+1});
+            sw_pp_flux_up.set_dims({ncol, nlev});
+            sw_pp_flux_dn.set_dims({ncol, nlev});
+            sw_pp_flux_dn_dir.set_dims({ncol, nlev});
 
-            Rte_sw_rt rte_sw;
-            Rte_solver_kernels_cuda_rt::apply_BC(ncol, n_lay, 0, sw_inc_flux_direct({1}), sw_pp_flux_dn_dir.ptr());
-            Rte_solver_kernels_cuda_rt::apply_BC(ncol, n_lay, 0, sw_inc_flux_diffuse({1}), sw_pp_flux_dn.ptr());
+            Rte_solver_kernels_cuda_rt::apply_BC(ncol, nlay, 0, sw_inc_flux_direct({1}), sw_pp_flux_dn_dir.ptr());
+            Rte_solver_kernels_cuda_rt::apply_BC(ncol, nlay, 0, sw_inc_flux_diffuse({1}), sw_pp_flux_dn.ptr());
 
             Rte_solver_kernels_cuda_rt::sw_solver_2stream(
-                ncol, n_lay, 0,
+                ncol, nlay, 0,
                 sw_tau_tot_g.ptr(),
                 sw_ssa_tot_g.ptr(),
                 sw_asy_tot_g.ptr(),
@@ -479,7 +646,7 @@ void solve_radiation(int argc, char** argv)
             const Vector<int> grid_cells = {nx, ny, nz};
 
             // Solve the radiation.
-            Status::print_message("Starting the raytracer!!");
+            Status::print_message("Starting the shortwave raytracer!!");
 
             cudaDeviceSynchronize();
             cudaEvent_t start;
@@ -529,7 +696,7 @@ void solve_radiation(int argc, char** argv)
             cudaEventDestroy(start);
             cudaEventDestroy(stop);
 
-            Status::print_message("Duration raytracer: " + std::to_string(duration) + " (ms)");
+            Status::print_message("Duration shortwave raytracer: " + std::to_string(duration) + " (ms)");
 
             // output arrays to cpu
             Array<Float,2> flux_tod_dn_c(sw_rt_flux_tod_dn);
@@ -540,7 +707,7 @@ void solve_radiation(int argc, char** argv)
             Array<Float,3> flux_abs_dir_c(sw_rt_flux_abs_dir);
             Array<Float,3> flux_abs_dif_c(sw_rt_flux_abs_dif);
             // Store the output.
-            Status::print_message("Storing the raytracer output.");
+            Status::print_message("Storing the shortwave raytracer output.");
 
             auto nc_flux_tod_dn     = nc_grp_forward.add_variable<Float>("sw_flux_tod_dn" , {"y", "x"});
             auto nc_flux_tod_up     = nc_grp_forward.add_variable<Float>("sw_flux_tod_up" , {"y", "x"});
@@ -559,64 +726,62 @@ void solve_radiation(int argc, char** argv)
             nc_flux_abs_dif  .insert(flux_abs_dif_c .v(), {0, 0, 0});
         }
     }
+
+    ////// backward solver
     if (switch_bw_raytracing)
     {
         Raytracer_bw raytracer_bw;
         const Vector<int> grid_cells = {nx, ny, n_z_in};
 
+        Array_gpu<Float,1> z_lev_g(z_lev);
+
         // Solve the radiation.
         Status::print_message("Starting the backward raytracer!!");
 
-        auto run_solver = [&]()
-        {
-            cudaDeviceSynchronize();
-            cudaEvent_t start;
-            cudaEvent_t stop;
-            cudaEventCreate(&start);
-            cudaEventCreate(&stop);
+        cudaDeviceSynchronize();
+        cudaEvent_t start;
+        cudaEvent_t stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
 
-            cudaEventRecord(start, 0);
+        cudaEventRecord(start, 0);
 
-            raytracer_bw.trace_rays_bb(
-                    0,
-                    bw_photons_per_pixel, n_lay,
-                    grid_cells, grid_d, kn_grid,
-                    z_lev,
-                    mie_cdfs_bw,
-                    mie_angs_bw,
-                    mie_phase_bw,
-                    mie_phase_angs_bw,
-                    rel,
-                    sw_tau_tot_g,
-                    sw_ssa_tot_g,
-                    sw_tau_cld_g,
-                    sw_ssa_cld_g,
-                    sw_asy_cld_g,
-                    sw_tau_aer_g,
-                    sw_ssa_aer_g,
-                    sw_asy_aer_g,
-                    alb_sfc_g,
-                    land_use_map,
-                    acos(mu0({1})),
-                    azi({1}),
-                    sw_inc_flux_direct({1})/mu0({1}),
-                    sw_inc_flux_diffuse({1}),
-                    camera,
-                    radiance);
+        raytracer_bw.trace_rays_bb(
+                0,
+                bw_photons_per_pixel, nlay,
+                grid_cells, grid_d, kn_grid,
+                z_lev_g,
+                mie_cdfs_bw,
+                mie_angs_bw,
+                mie_phase_bw,
+                mie_phase_angs_bw,
+                rel,
+                sw_tau_tot_g,
+                sw_ssa_tot_g,
+                sw_tau_cld_g,
+                sw_ssa_cld_g,
+                sw_asy_cld_g,
+                sw_tau_aer_g,
+                sw_ssa_aer_g,
+                sw_asy_aer_g,
+                alb_sfc_g,
+                land_use_map,
+                acos(mu0({1})),
+                azi({1}),
+                sw_inc_flux_direct({1})/mu0({1}),
+                sw_inc_flux_diffuse({1}),
+                camera,
+                radiance);
 
-            cudaEventRecord(stop, 0);
-            cudaEventSynchronize(stop);
-            float duration = 0.f;
-            cudaEventElapsedTime(&duration, start, stop);
+        cudaEventRecord(stop, 0);
+        cudaEventSynchronize(stop);
+        float duration = 0.f;
+        cudaEventElapsedTime(&duration, start, stop);
 
-            cudaEventDestroy(start);
-            cudaEventDestroy(stop);
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
 
-            Status::print_message("Duration bw raytracer: " + std::to_string(duration) + " (ms)");
-        };
-
-        // Tuning step;
-        run_solver();
+        Status::print_message("Duration bw raytracer: " + std::to_string(duration) + " (ms)");
 
         // output arrays to cpu
         Array<Float,2> radiance_c(radiance);
