@@ -752,7 +752,7 @@ void Radiation_solver_longwave::solve_gpu(
             {
                 ++monte_carlo_gpoints;
 
-                const Float lw_flux_tod = bg_profile_present ? (*fluxes).get_flux_dn()({1, grid_cells.z}) : Float(0.);
+                const Float lw_flux_tod = bg_profile_present ? (*fluxes).get_flux_dn()({1, grid_cells.z+1}) : Float(0.);
 
                 raytracer_lw.trace_rays(
                         igpt,
