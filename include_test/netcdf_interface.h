@@ -141,6 +141,7 @@ class Netcdf_file : public Netcdf_handle
 class Netcdf_group : public Netcdf_handle
 {
     public:
+        Netcdf_group() : Netcdf_handle() { ncid = -1; root_ncid = -1; }
         Netcdf_group(const int, const int);
 };
 

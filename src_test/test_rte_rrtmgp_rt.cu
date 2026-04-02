@@ -638,10 +638,22 @@ void solve_radiation(int argc, char** argv)
     output_nc.add_dimension("lay", n_lay);
     output_nc.add_dimension("lev", n_lev);
 
-    Netcdf_group nc_grp_forward = output_nc.add_group("rt_forward");
-    Netcdf_group nc_grp_backward = output_nc.add_group("rt_backward");
-    Netcdf_group nc_grp_planeparallel = output_nc.add_group("plane_parallel");
-    Netcdf_group nc_grp_optics = output_nc.add_group("optical_properties");
+    Netcdf_group nc_grp_forward;
+    Netcdf_group nc_grp_backward;
+    Netcdf_group nc_grp_planeparallel;
+    Netcdf_group nc_grp_optics;
+
+    if ((switch_shortwave && switch_sw_raytracing) || (switch_longwave && switch_lw_raytracing))
+        nc_grp_forward = output_nc.add_group("rt_forward");
+
+    if (switch_bw_raytracing)
+        nc_grp_backward = output_nc.add_group("rt_backward");
+
+    if ((switch_shortwave && switch_sw_plane_parallel) || (switch_longwave && switch_lw_plane_parallel))
+        nc_grp_planeparallel = output_nc.add_group("plane_parallel");
+
+    if ((switch_shortwave && (sw_single_gpt > 0)) || (switch_longwave && (lw_single_gpt > 0)))
+        nc_grp_optics = output_nc.add_group("optical_properties");
 
     auto nc_x = output_nc.add_variable<Float>("x", {"x"});
     auto nc_y = output_nc.add_variable<Float>("y", {"y"});
