@@ -110,9 +110,6 @@ void solve_radiation(int argc, char** argv)
     // solve broadband radiances
     const bool switch_broadband             = get_ini_value<bool>(settings, "backward", "broadband", false);
 
-    // output additional cloud statistics for each camera pixel
-    bool switch_cloud_cam                   = get_ini_value<bool>(settings, "backward", "cloud_cam", false);
-
     // if >0, overwrite zenith angle from input netcdf file
     Float input_sza = get_ini_value<Float>(settings, "solar_angles", "sza", -1.0);
     // if >0, overwrite azimuth angle from input netcdf file
@@ -191,7 +188,7 @@ void solve_radiation(int argc, char** argv)
     const Array<Float,1> grid_y(input_nc.get_variable<Float>("y", {ny}), {ny});
     const Array<Float,1> grid_z(input_nc.get_variable<Float>("z", {n_z_in}), {n_z_in});
 
-    const Array<Float,1> z_lev(input_nc.get_variable<Float>("z_lev", {nlev}), {nlev});
+    const Array<Float,1> z_lev(input_nc.get_variable<Float>("lev", {nlev}), {nlev});
 
     const Float dx = grid_x({2}) - grid_x({1});
     const Float dy = grid_y({2}) - grid_y({1});
@@ -292,33 +289,32 @@ void solve_radiation(int argc, char** argv)
         alb_sfc = input_nc.get_variable<Float>("alb_sfc", {ny, nx});
 
         mu0.set_dims({nx, ny});
-        mu0 = input_nc.get_variable<Float>("mu0", {ny, nx});
-
-        azi.set_dims({nx, ny});
-        azi = input_nc.get_variable<Float>("azi", {ny, nx});
-
-        // overwrite mu0 and azi if solar angles are provided in ini
         if (input_sza >= 0)
             mu0.fill(cos(input_sza / Float(180.0) * M_PI));
+        else
+            mu0 = input_nc.get_variable<Float>("mu0", {ny, nx});
 
+        azi.set_dims({nx, ny});
         if (input_azi >= 0)
             azi.fill(input_azi / Float(180.0) * M_PI);
+        else
+            azi = input_nc.get_variable<Float>("azi", {ny, nx});
 
         sw_inc_flux_direct.set_dims({nx, ny});
         sw_inc_flux_direct = input_nc.get_variable<Float>("sw_inc_flux_direct", {ny, nx});
 
         sw_inc_flux_diffuse.set_dims({nx, ny});
-        sw_inc_flux_diffuse= input_nc.get_variable<Float>("sw_inc_flux_diffuse", {ny, nx});
+        sw_inc_flux_diffuse = input_nc.get_variable<Float>("sw_inc_flux_diffuse", {ny, nx});
 
     }
 
     if (switch_longwave)
     {
         emis_sfc.set_dims({nx, ny});
-        emis_sfc = input_nc.get_variable<Float>("emis_sfc", {ny, nx});
+        emis_sfc = std::move(input_nc.get_variable<Float>("emis_sfc", {ny, nx}));
 
         lw_inc_flux.set_dims({nx, ny});
-        lw_inc_flux = input_nc.get_variable<Float>("lw_inc_flux", {ny, nx});
+        lw_inc_flux = std::move(input_nc.get_variable<Float>("lw_inc_flux", {ny, nx}));
     }
 
     Array_gpu<Float,2> radiance({camera.nx, camera.ny});
@@ -460,7 +456,7 @@ void solve_radiation(int argc, char** argv)
             lw_pp_flux_dn.set_dims({ncol, nlev});
             lw_pp_flux_dn_dir.set_dims({ncol, nlev});
 
-            Rte_solver_kernels_cuda_rt::apply_BC(ncol, nlay, 0, lw_inc_flux({1}), lw_pp_flux_dn.ptr());
+            Rte_solver_kernels_cuda_rt::apply_BC(ncol, nlay, 0, lw_inc_flux({1,1}), lw_pp_flux_dn.ptr());
 
             if (do_lw_scattering)
             {
@@ -601,14 +597,15 @@ void solve_radiation(int argc, char** argv)
         Array_gpu<Float,2> sw_pp_flux_dn;
         Array_gpu<Float,2> sw_pp_flux_up;
         Array_gpu<Float,2> sw_pp_flux_dn_dir;
+
         if (switch_sw_plane_parallel)
         {
             sw_pp_flux_up.set_dims({ncol, nlev});
             sw_pp_flux_dn.set_dims({ncol, nlev});
             sw_pp_flux_dn_dir.set_dims({ncol, nlev});
 
-            Rte_solver_kernels_cuda_rt::apply_BC(ncol, nlay, 0, sw_inc_flux_direct({1}), sw_pp_flux_dn_dir.ptr());
-            Rte_solver_kernels_cuda_rt::apply_BC(ncol, nlay, 0, sw_inc_flux_diffuse({1}), sw_pp_flux_dn.ptr());
+            Rte_solver_kernels_cuda_rt::apply_BC(ncol, nlay, 0, sw_inc_flux_direct({1,1}), sw_pp_flux_dn_dir.ptr());
+            Rte_solver_kernels_cuda_rt::apply_BC(ncol, nlay, 0, sw_inc_flux_diffuse({1,1}), sw_pp_flux_dn.ptr());
 
             Rte_solver_kernels_cuda_rt::sw_solver_2stream(
                 ncol, nlay, 0,
@@ -657,7 +654,7 @@ void solve_radiation(int argc, char** argv)
             cudaEventRecord(start, 0);
             // do something.
 
-	        raytracer.trace_rays(
+            raytracer.trace_rays(
                    0,
                    switch_sw_independent_column,
                    sw_photons_per_pixel,
@@ -676,10 +673,10 @@ void solve_radiation(int argc, char** argv)
                    sw_asy_aer_g,
                    rel,
                    alb_sfc_g,
-                   acos(mu0({1})),
-                   azi({1}),
-                   sw_inc_flux_direct({1}),
-                   sw_inc_flux_diffuse({1}),
+                   acos(mu0({1,1})),
+                   azi({1,1}),
+                   sw_inc_flux_direct({1,1}),
+                   sw_inc_flux_diffuse({1,1}),
                    sw_rt_flux_tod_dn,
                    sw_rt_flux_tod_up,
                    sw_rt_flux_sfc_dir,
@@ -766,10 +763,10 @@ void solve_radiation(int argc, char** argv)
                 sw_asy_aer_g,
                 alb_sfc_g,
                 land_use_map,
-                acos(mu0({1})),
-                azi({1}),
-                sw_inc_flux_direct({1})/mu0({1}),
-                sw_inc_flux_diffuse({1}),
+                acos(mu0({1,1})),
+                azi({1,1}),
+                sw_inc_flux_direct({1,1})/mu0({1,1}),
+                sw_inc_flux_diffuse({1,1}),
                 camera,
                 radiance);
 

@@ -502,7 +502,7 @@ void Radiation_solver_longwave::solve_gpu(
         const Array_gpu<Float,2>& lwp, const Array_gpu<Float,2>& iwp,
         const Array_gpu<Float,2>& rel, const Array_gpu<Float,2>& dei,
         const Array_gpu<Float,2>& rh,
-        Array_gpu<Float,2>& tot_tau_out, Array_gpu<Float,2>& tot_ssa_out,
+        Array_gpu<Float,2>& tot_tau_out, Array_gpu<Float,2>& tot_ssa_out, Array_gpu<Float,2>& tot_asy_out,
         Array_gpu<Float,2>& cld_tau_out, Array_gpu<Float,2>& cld_ssa_out, Array_gpu<Float,2>& cld_asy_out,
         Array_gpu<Float,2>& aer_tau_out, Array_gpu<Float,2>& aer_ssa_out, Array_gpu<Float,2>& aer_asy_out,
         Array_gpu<Float,2>& lay_source, Array_gpu<Float,2>& lev_source, Array_gpu<Float,1>& sfc_source,
@@ -697,15 +697,16 @@ void Radiation_solver_longwave::solve_gpu(
 
             tot_tau_out = optical_props->get_tau();
             cld_tau_out = cloud_optical_props->get_tau();
+            aer_asy_out = aerosol_optical_props->get_g();
 
             if (switch_lw_scattering)
             {
                 tot_ssa_out = optical_props->get_ssa();
+                tot_asy_out = optical_props->get_g();
                 cld_ssa_out = cloud_optical_props->get_ssa();
                 cld_asy_out = cloud_optical_props->get_g();
                 aer_tau_out = aerosol_optical_props->get_tau();
                 aer_ssa_out = aerosol_optical_props->get_ssa();
-                aer_asy_out = aerosol_optical_props->get_g();
             }
         }
 
@@ -867,7 +868,7 @@ void Radiation_solver_shortwave::solve_gpu(
         const Array_gpu<Float,2>& rel, const Array_gpu<Float,2>& dei,
         const Array_gpu<Float,2>& rh,
         Aerosol_concs_gpu& aerosol_concs,
-        Array_gpu<Float,2>& tot_tau_out, Array_gpu<Float,2>& tot_ssa_out,
+        Array_gpu<Float,2>& tot_tau_out, Array_gpu<Float,2>& tot_ssa_out, Array_gpu<Float,2>& tot_asy_out,
         Array_gpu<Float,2>& cld_tau_out, Array_gpu<Float,2>& cld_ssa_out, Array_gpu<Float,2>& cld_asy_out,
         Array_gpu<Float,2>& aer_tau_out, Array_gpu<Float,2>& aer_ssa_out, Array_gpu<Float,2>& aer_asy_out,
         Array_gpu<Float,2>& sw_flux_up, Array_gpu<Float,2>& sw_flux_dn,
@@ -1060,6 +1061,7 @@ void Radiation_solver_shortwave::solve_gpu(
         {
             tot_tau_out = optical_props->get_tau();
             tot_ssa_out = optical_props->get_ssa();
+            tot_asy_out = optical_props->get_g();
             cld_tau_out = cloud_optical_props->get_tau();
             cld_ssa_out = cloud_optical_props->get_ssa();
             cld_asy_out = cloud_optical_props->get_g();

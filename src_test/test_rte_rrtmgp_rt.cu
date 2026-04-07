@@ -719,6 +719,7 @@ void solve_radiation(int argc, char** argv)
         // Create output arrays.
         Array_gpu<Float,2> lw_tau_tot;
         Array_gpu<Float,2> lw_ssa_tot;
+        Array_gpu<Float,2> lw_asy_tot;
         Array_gpu<Float,2> lw_tau_cld;
         Array_gpu<Float,2> lw_ssa_cld;
         Array_gpu<Float,2> lw_asy_cld;
@@ -737,6 +738,7 @@ void solve_radiation(int argc, char** argv)
             if (switch_lw_scattering)
             {
                 lw_ssa_tot    .set_dims({n_col, n_lay});
+                lw_asy_tot    .set_dims({n_col, n_lay});
                 lw_ssa_cld    .set_dims({n_col, n_lay});
                 lw_asy_cld    .set_dims({n_col, n_lay});
                 lw_ssa_aer    .set_dims({n_col, n_lay});
@@ -811,7 +813,7 @@ void solve_radiation(int argc, char** argv)
                     t_sfc_gpu, emis_sfc_gpu,
                     lwp_gpu, iwp_gpu,
                     rel_gpu, dei_gpu, rh_gpu,
-                    lw_tau_tot, lw_ssa_tot,
+                    lw_tau_tot, lw_ssa_tot, lw_asy_tot,
                     lw_tau_cld, lw_ssa_cld, lw_asy_cld,
                     lw_tau_aer, lw_ssa_aer, lw_asy_aer,
                     lay_source, lev_source, sfc_source,
@@ -839,6 +841,7 @@ void solve_radiation(int argc, char** argv)
         Array<Float,2> lw_tau_cld_cpu(lw_tau_cld);
         Array<Float,2> lw_tau_aer_cpu(lw_tau_aer);
         Array<Float,2> lw_ssa_tot_cpu;
+        Array<Float,2> lw_asy_tot_cpu;
         Array<Float,2> lw_ssa_cld_cpu;
         Array<Float,2> lw_asy_cld_cpu;
         Array<Float,2> lw_ssa_aer_cpu;
@@ -846,6 +849,7 @@ void solve_radiation(int argc, char** argv)
         if (switch_lw_scattering)
         {
             lw_ssa_tot_cpu = lw_ssa_tot;
+            lw_asy_tot_cpu = lw_asy_tot;
             lw_ssa_cld_cpu = lw_ssa_cld;
             lw_asy_cld_cpu = lw_asy_cld;
             lw_ssa_aer_cpu = lw_ssa_aer;
@@ -876,9 +880,9 @@ void solve_radiation(int argc, char** argv)
                     nc_outvar{"lw_tau_tot", "Total optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_tot_cpu.v()},
                     nc_outvar{"lw_tau_cld", "Cloud optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_cld_cpu.v()},
                     nc_outvar{"lw_tau_aer", "Aerosol optical depth at g-point "                + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_aer_cpu.v()},
-                    nc_outvar{"lay_source", "Layer source at g-point "                         + gpt, "W m-2 sr-1", "", {"lay","y","x"}, {0,0,0}, lay_source_cpu.v()},
-                    nc_outvar{"lev_source", "Level source at g-point "                         + gpt, "W m-2 sr-1", "", {"lev","y","x"}, {0,0,0}, lev_source_cpu.v()},
-                    nc_outvar{"sfc_source", "Surface source at at g-point "                    + gpt, "W m-2 sr-1", "", {"y","x"},       {0,0},   sfc_source_cpu.v()},
+                    nc_outvar{"source_lay", "Layer source at g-point "                         + gpt, "W m-2 sr-1", "", {"lay","y","x"}, {0,0,0}, lay_source_cpu.v()},
+                    nc_outvar{"source_lev", "Level source at g-point "                         + gpt, "W m-2 sr-1", "", {"lev","y","x"}, {0,0,0}, lev_source_cpu.v()},
+                    nc_outvar{"source_sfc", "Surface source at at g-point "                    + gpt, "W m-2 sr-1", "", {"y","x"},       {0,0},   sfc_source_cpu.v()},
                 };
             }
             else
@@ -887,15 +891,16 @@ void solve_radiation(int argc, char** argv)
                 {
                     nc_outvar{"lw_tau_tot", "Total optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_tot_cpu.v()},
                     nc_outvar{"lw_ssa_tot", "Total single scattering albedo at g-point "       + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_ssa_tot_cpu.v()},
+                    nc_outvar{"lw_asy_tot", "Total asymmetry parameter at g-point"             + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_asy_tot_cpu.v()},
                     nc_outvar{"lw_tau_cld", "Cloud optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_cld_cpu.v()},
                     nc_outvar{"lw_ssa_cld", "Cloud single scattering albedo at g-point "       + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_ssa_cld_cpu.v()},
                     nc_outvar{"lw_asy_cld", "Cloud asymmetry parameter at g-point "            + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_asy_cld_cpu.v()},
                     nc_outvar{"lw_tau_aer", "Aerosol optical depth at g-point "                + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_tau_aer_cpu.v()},
                     nc_outvar{"lw_ssa_aer", "Aerosol single scattering albedo at g-point "     + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_ssa_aer_cpu.v()},
                     nc_outvar{"lw_asy_aer", "Aerosol asymmetry parameter at g-point "          + gpt, "-", "", {"lay","y","x"}, {0,0,0}, lw_asy_aer_cpu.v()},
-                    nc_outvar{"lay_source", "Layer source at g-point "                         + gpt, "W m-2 sr-1", "", {"lay","y","x"}, {0,0,0}, lay_source_cpu.v()},
-                    nc_outvar{"lev_source", "Level source at g-point "                         + gpt, "W m-2 sr-1", "", {"lev","y","x"}, {0,0,0}, lev_source_cpu.v()},
-                    nc_outvar{"sfc_source", "Surface source at at g-point "                    + gpt, "W m-2 sr-1", "", {"y","x"},       {0,0},   sfc_source_cpu.v()},
+                    nc_outvar{"source_lay", "Layer source at g-point "                         + gpt, "W m-2 sr-1", "", {"lay","y","x"}, {0,0,0}, lay_source_cpu.v()},
+                    nc_outvar{"source_lev", "Level source at g-point "                         + gpt, "W m-2 sr-1", "", {"lev","y","x"}, {0,0,0}, lev_source_cpu.v()},
+                    nc_outvar{"source_sfc", "Surface source at at g-point "                    + gpt, "W m-2 sr-1", "", {"y","x"},       {0,0},   sfc_source_cpu.v()},
                 };
             }
 
@@ -994,6 +999,7 @@ void solve_radiation(int argc, char** argv)
         // Create output arrays.
         Array_gpu<Float,2> sw_tau_tot;
         Array_gpu<Float,2> sw_ssa_tot;
+        Array_gpu<Float,2> sw_asy_tot;
         Array_gpu<Float,2> sw_tau_cld;
         Array_gpu<Float,2> sw_ssa_cld;
         Array_gpu<Float,2> sw_asy_cld;
@@ -1005,6 +1011,7 @@ void solve_radiation(int argc, char** argv)
         {
             sw_tau_tot    .set_dims({n_col, n_lay});
             sw_ssa_tot    .set_dims({n_col, n_lay});
+            sw_asy_tot    .set_dims({n_col, n_lay});
             sw_tau_cld    .set_dims({n_col, n_lay});
             sw_ssa_cld    .set_dims({n_col, n_lay});
             sw_asy_cld    .set_dims({n_col, n_lay});
@@ -1086,7 +1093,7 @@ void solve_radiation(int argc, char** argv)
                     rel_gpu, dei_gpu,
                     rh,
                     aerosol_concs_gpu,
-                    sw_tau_tot, sw_ssa_tot,
+                    sw_tau_tot, sw_ssa_tot, sw_asy_tot,
                     sw_tau_cld, sw_ssa_cld, sw_asy_cld,
                     sw_tau_aer, sw_ssa_aer, sw_asy_aer,
                     sw_flux_up, sw_flux_dn,
@@ -1116,6 +1123,7 @@ void solve_radiation(int argc, char** argv)
         Status::print_message("Storing the shortwave output.");
         Array<Float,2> sw_tau_tot_cpu(sw_tau_tot);
         Array<Float,2> sw_ssa_tot_cpu(sw_ssa_tot);
+        Array<Float,2> sw_asy_tot_cpu(sw_asy_tot);
         Array<Float,2> sw_tau_cld_cpu(sw_tau_cld);
         Array<Float,2> sw_ssa_cld_cpu(sw_ssa_cld);
         Array<Float,2> sw_asy_cld_cpu(sw_asy_cld);
@@ -1142,6 +1150,7 @@ void solve_radiation(int argc, char** argv)
             {
                 nc_outvar{"sw_tau_tot", "Total optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_tau_tot_cpu.v()},
                 nc_outvar{"sw_ssa_tot", "Total single scattering albedo at g-point "       + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_ssa_tot_cpu.v()},
+                nc_outvar{"sw_asy_tot", "Total asymmetry parameter at g-point"             + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_asy_tot_cpu.v()},
                 nc_outvar{"sw_tau_cld", "Cloud optical depth at g-point "                  + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_tau_cld_cpu.v()},
                 nc_outvar{"sw_ssa_cld", "Cloud single scattering albedo at g-point "       + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_ssa_cld_cpu.v()},
                 nc_outvar{"sw_asy_cld", "Cloud asymmetry parameter at g-point "            + gpt, "-", "", {"lay","y","x"}, {0,0,0}, sw_asy_cld_cpu.v()},
