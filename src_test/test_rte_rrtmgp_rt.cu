@@ -157,6 +157,11 @@ T get_ini_value(const toml::value& ini_file, const std::string& group, const std
 template<typename T>
 T get_ini_value(const toml::value& ini_file, const std::string& group, const std::string& item, const T default_value)
 {
+    if (!ini_file.contains(group))
+    {
+        std::cout << "[" << group << "]" << "[" << item << "] = " << default_value << " (default, group not found)" << std::endl;
+        return default_value;
+    }
     auto ini_group = toml::find(ini_file, group);
     const T value = toml::find_or(ini_group, item, default_value);
     std::cout << "[" << group << "]" << "[" << item << "] = " << value << std::endl;
