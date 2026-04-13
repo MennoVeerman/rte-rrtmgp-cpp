@@ -374,7 +374,7 @@ void Raytracer::trace_rays(
 
     const int mie_table_size = mie_cdf.size();
 
-    const int qrng_gpt_offset = (igpt-1) * rt_kernel_grid_size * rt_kernel_block_size * photons_per_thread;
+    const Int rng_gpt_offset = (igpt-1) * rt_kernel_grid_size * rt_kernel_block_size;
 
     if (switch_independent_column)
     {
@@ -382,7 +382,7 @@ void Raytracer::trace_rays(
                 photons_per_thread,
                 qrng_grid_x,
                 qrng_grid_y,
-                qrng_gpt_offset,
+                rng_gpt_offset,
                 k_null_grid.ptr(),
                 tod_dn_count.ptr(),
                 tod_up_count.ptr(),
@@ -407,7 +407,7 @@ void Raytracer::trace_rays(
                 photons_per_thread,
                 qrng_grid_x,
                 qrng_grid_y,
-                qrng_gpt_offset,
+                rng_gpt_offset,
                 k_null_grid.ptr(),
                 tod_dn_count.ptr(),
                 tod_up_count.ptr(),
