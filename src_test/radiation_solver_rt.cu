@@ -770,7 +770,7 @@ void Radiation_solver_longwave::solve_gpu(
                         dynamic_cast<Optical_props_2str_rt&>(*aerosol_optical_props).get_g(),
                         (*sources).get_lay_source(),
                         (*sources).get_sfc_source(),
-                        emis_sfc,
+                        emis_sfc.subset({{ {band, band}, {1, n_col}}}),
                         lw_flux_tod,
                         (*fluxes).get_flux_tod_dn(),
                         (*fluxes).get_flux_tod_up(),
