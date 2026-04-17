@@ -179,6 +179,7 @@ namespace
         {
             const int idx = icol_x + icol_y*grid_cells.x;
             const Float flux_per_ray = toa_src / photons_per_col;
+
             flux_1[idx] = count_1[idx] * flux_per_ray;
             flux_2[idx] = count_2[idx] * flux_per_ray;
             flux_3[idx] = count_3[idx] * flux_per_ray;
