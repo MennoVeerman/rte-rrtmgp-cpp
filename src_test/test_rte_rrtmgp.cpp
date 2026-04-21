@@ -150,6 +150,7 @@ void solve_radiation(int argc, char** argv)
     const bool switch_aerosol_optics      = get_ini_value<bool>(settings, "aerosols", "aerosol_optics", false);
     const bool switch_delta_aerosol       = get_ini_value<bool>(settings, "aerosols", "delta_aerosol", false);
 
+    const Float input_sza = get_ini_value<Float>(settings, "solar_angles", "sza", -1.0);
 
     ////// READ THE ATMOSPHERIC DATA //////
     Status::print_message("Reading atmospheric input data from NetCDF.");
@@ -359,6 +360,9 @@ void solve_radiation(int argc, char** argv)
         const int n_gpt_sw = rad_sw.get_n_gpt();
 
         Array<Float,1> mu0(input_nc.get_variable<Float>("mu0", {n_col_y, n_col_x}), {n_col});
+        // overwrite mu0 if solar angles are provided in ini
+        if (input_sza >= 0)
+            mu0.fill(cos(input_sza / Float(180.0) * M_PI));
 
         Array<Float,2> sfc_alb_dir({n_bnd_sw, n_col});
         Array<Float,2> sfc_alb_dif({n_bnd_sw, n_col});
